@@ -1,0 +1,180 @@
+# Cloud Build configuration for daily image builds
+# Trigger: Cloud Scheduler at 03:00 HKT daily
+
+steps:
+  # Step 1: Create a temporary VM for building the image
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'create-build-vm'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME="image-builder-${BUILD_ID:0:8}"
+        echo "Creating build instance: $INSTANCE_NAME"
+        
+        gcloud compute instances create "$INSTANCE_NAME" \
+          --project="${PROJECT_ID}" \
+          --zone="${_ZONE}" \
+          --machine-type="n2-standard-4" \
+          --image-family="ubuntu-2404-lts-amd64" \
+          --image-project="ubuntu-os-cloud" \
+          --boot-disk-size=100GB \
+          --boot-disk-type=pd-ssd \
+          --scopes=cloud-platform \
+          --metadata=startup-script='${_SETUP_SCRIPT}'
+        
+        echo "$INSTANCE_NAME" > /workspace/instance-name.txt
+
+  # Step 2: Wait for setup to complete
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'wait-for-setup'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME=$(cat /workspace/instance-name.txt)
+        echo "Waiting for setup to complete on $INSTANCE_NAME..."
+        
+        MAX_WAIT=1200
+        WAITED=0
+        
+        while [[ $WAITED -lt $MAX_WAIT ]]; do
+          if gcloud compute ssh "$INSTANCE_NAME" \
+            --project="${PROJECT_ID}" \
+            --zone="${_ZONE}" \
+            --command="test -f /tmp/setup-complete" \
+            --quiet 2>/dev/null; then
+            echo "Setup complete!"
+            exit 0
+          fi
+          echo "Waiting... ($WAITED seconds elapsed)"
+          sleep 30
+          WAITED=$((WAITED + 30))
+        done
+        
+        echo "ERROR: Setup timed out!"
+        exit 1
+
+  # Step 3: Stop the instance
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'stop-vm'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME=$(cat /workspace/instance-name.txt)
+        echo "Stopping instance: $INSTANCE_NAME"
+        
+        gcloud compute instances stop "$INSTANCE_NAME" \
+          --project="${PROJECT_ID}" \
+          --zone="${_ZONE}"
+        
+        # Wait for instance to fully stop
+        sleep 60
+
+  # Step 4: Create image from the instance
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'create-image'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME=$(cat /workspace/instance-name.txt)
+        DATE_TAG=$(date +%Y%m%d)
+        IMAGE_NAME="${_IMAGE_FAMILY}-${DATE_TAG}"
+        
+        echo "Creating image: $IMAGE_NAME"
+        
+        gcloud compute images create "$IMAGE_NAME" \
+          --project="${PROJECT_ID}" \
+          --source-disk="$INSTANCE_NAME" \
+          --source-disk-zone="${_ZONE}" \
+          --family="${_IMAGE_FAMILY}" \
+          --description="Teable dev environment image built by Cloud Build"
+
+  # Step 5: Delete the temporary instance
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'cleanup-vm'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        INSTANCE_NAME=$(cat /workspace/instance-name.txt)
+        echo "Deleting instance: $INSTANCE_NAME"
+        
+        gcloud compute instances delete "$INSTANCE_NAME" \
+          --project="${PROJECT_ID}" \
+          --zone="${_ZONE}" \
+          --quiet
+
+  # Step 6: Clean up old images (keep last 7)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'cleanup-old-images'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Cleaning up old images..."
+        
+        OLD_IMAGES=$(gcloud compute images list \
+          --project="${PROJECT_ID}" \
+          --filter="family:${_IMAGE_FAMILY}" \
+          --sort-by="~creationTimestamp" \
+          --format="value(name)" | tail -n +8)
+        
+        for img in $OLD_IMAGES; do
+          echo "Deleting old image: $img"
+          gcloud compute images delete "$img" --project="${PROJECT_ID}" --quiet || true
+        done
+
+substitutions:
+  _ZONE: 'asia-east2-a'
+  _IMAGE_FAMILY: 'teable-dev'
+  _SETUP_SCRIPT: |
+    #!/bin/bash
+    set -e
+    exec > >(tee /var/log/image-setup.log) 2>&1
+    export DEBIAN_FRONTEND=noninteractive
+    
+    # Update and install essentials
+    apt-get update && apt-get upgrade -y
+    apt-get install -y curl wget git vim htop tmux jq unzip build-essential ca-certificates gnupg lsb-release
+    
+    # Install Docker
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl start docker && systemctl enable docker
+    
+    # Install Node.js 22
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+    corepack enable && corepack prepare pnpm@latest --activate
+    
+    # Create developer user
+    useradd -m -s /bin/bash developer || true
+    usermod -aG docker developer
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    
+    # Clone and setup
+    cd /home/developer
+    sudo -u developer git clone --depth 1 -b develop https://github.com/teableio/teable.git workspace || true
+    cd /home/developer/workspace && sudo -u developer bash -c 'export HOME=/home/developer && pnpm install' || true
+    chown -R developer:developer /home/developer
+    
+    # Pre-pull Docker images
+    docker pull postgres:15 || true
+    docker pull redis:7 || true
+    
+    # Cleanup
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+    
+    touch /tmp/setup-complete
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '3600s'  # 1 hour timeout
+

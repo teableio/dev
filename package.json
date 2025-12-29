@@ -1,0 +1,35 @@
+{
+  "name": "dev",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.26.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@auth/core": "^0.34.3",
+    "@google-cloud/compute": "^6.6.0",
+    "lucide-react": "^0.562.0",
+    "next": "15.5.9",
+    "next-auth": "5.0.0-beta.30",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.9",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
