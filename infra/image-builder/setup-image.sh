@@ -59,10 +59,16 @@ echo "=== Installing Node.js 22 ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
-# Enable corepack and install pnpm
+# Enable corepack and install pnpm globally
 echo ""
 echo "=== Setting up pnpm ==="
 corepack enable
+
+# Install pnpm globally so all users have it available immediately
+# This prevents "Corepack is about to download" prompts for new users
+npm install -g pnpm@latest
+
+# Also prepare via corepack for packageManager field support
 corepack prepare pnpm@latest --activate
 
 # Create developer user and group
