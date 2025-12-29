@@ -438,23 +438,33 @@ export function EnvironmentPanel({
               <MachineTypeSelector />
             </div>
 
-            <button
-              onClick={() => createEnvironment("default")}
-              disabled={isCreating}
-              className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-            >
-              {isCreating ? (
-                <>
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                  Creating Environment...
-                </>
-              ) : (
-                <>
-                  <Play className="w-6 h-6" />
-                  Create Environment
-                </>
-              )}
-            </button>
+            <div className="flex flex-col items-center gap-4">
+              <button
+                onClick={() => createEnvironment("default")}
+                disabled={isCreating}
+                className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    Creating Environment...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-6 h-6" />
+                    Create Environment
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={() => setShowNewInstanceForm(true)}
+                className="text-sm text-slate-500 hover:text-emerald-400 transition-colors flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Or create with custom name
+              </button>
+            </div>
           </>
         )}
 
@@ -518,9 +528,9 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
   const isRunning = environment.status === "RUNNING";
   const isStopped = environment.status === "STOPPED";
 
-  // Instance selector component (shown when there are multiple instances)
-  const InstanceSelector = () => {
-    if (environments.length <= 1 && !showNewInstanceForm) return null;
+  // Instance selector component - always show when there's at least one environment
+  const InstanceSelector = ({ showAddButton = true }: { showAddButton?: boolean }) => {
+    if (environments.length === 0) return null;
     
     return (
       <div className="mb-6 flex items-center gap-4 justify-center flex-wrap">
@@ -528,9 +538,12 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
           {environments.map((env) => (
             <button
               key={env.instanceId}
-              onClick={() => setSelectedInstanceId(env.instanceId)}
+              onClick={() => {
+                setSelectedInstanceId(env.instanceId);
+                setShowNewInstanceForm(false);
+              }}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
-                env.instanceId === selectedInstanceId
+                env.instanceId === selectedInstanceId && !showNewInstanceForm
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
                   : 'bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-600'
               }`}
@@ -543,13 +556,19 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setShowNewInstanceForm(true)}
-          className="px-4 py-2 rounded-xl text-sm font-medium bg-slate-800/50 text-slate-400 border border-dashed border-slate-600 hover:border-emerald-500/50 hover:text-emerald-400 transition-colors flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          New Instance
-        </button>
+        {showAddButton && (
+          <button
+            onClick={() => setShowNewInstanceForm(true)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium border border-dashed transition-colors flex items-center gap-2 ${
+              showNewInstanceForm
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
+                : 'bg-slate-800/50 text-slate-400 border-slate-600 hover:border-emerald-500/50 hover:text-emerald-400'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            New Instance
+          </button>
+        )}
       </div>
     );
   };
@@ -654,10 +673,10 @@ echo "✓ SSH configured for all Teable dev environments"`;
 
   return (
     <div className="space-y-6">
-      {/* Instance Selector - show when multiple instances */}
-      {environments.length > 1 && <InstanceSelector />}
+      {/* Instance Selector - always show for managing instances */}
+      <InstanceSelector />
       
-      {/* New Instance Form Modal */}
+      {/* New Instance Form */}
       {showNewInstanceForm && (
         <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-6">
           <NewInstanceForm />
