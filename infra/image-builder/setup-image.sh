@@ -182,6 +182,14 @@ chmod 644 /etc/ssh/ssh_host_*_key.pub
 # Since we already have keys, this won't run, but let's be explicit
 systemctl disable ssh-keygen-host-keys.service 2>/dev/null || true
 
+# IMPORTANT: Disable cloud-init SSH module which regenerates host keys on every boot
+# This is the actual culprit on GCP VMs!
+echo "ssh_deletekeys: false" >> /etc/cloud/cloud.cfg
+echo "ssh_genkeytypes: []" >> /etc/cloud/cloud.cfg
+# Also create a marker file that cloud-init checks
+mkdir -p /var/lib/cloud/instance
+touch /var/lib/cloud/instance/ssh_key_generated
+
 # Display the host key fingerprints for reference
 echo "SSH host key fingerprints (save these for verification):"
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
