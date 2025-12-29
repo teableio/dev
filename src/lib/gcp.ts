@@ -761,13 +761,12 @@ ${tokenSetup}
 echo "Restored from snapshot, skipping git pull" >> /var/log/startup.log
 ` : `
 # Update repository to latest develop branch (fresh environment only)
-cd /home/developer/workspace
-sudo -u developer HOME=/home/developer git fetch origin
-sudo -u developer HOME=/home/developer git checkout develop
-sudo -u developer HOME=/home/developer git pull origin develop
+# Skip git pull since the image is already up-to-date and we may not have credentials yet
+echo "Fresh environment - image already has latest code" >> /var/log/startup.log
 
-# Install any new dependencies
-sudo -u developer HOME=/home/developer bash -c 'cd /home/developer/workspace && pnpm install'
+# Install any new dependencies (in case package.json changed)
+cd /home/developer/workspace
+sudo -u developer HOME=/home/developer bash -c 'cd /home/developer/workspace && pnpm install' || echo "pnpm install skipped" >> /var/log/startup.log
 `;
 
   const activityMonitor = `
