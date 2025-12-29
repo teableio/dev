@@ -746,7 +746,21 @@ echo "✓ GitHub credentials configured for ${username}" >> /var/log/startup.log
 echo "⚠ No GitHub token provided" >> /var/log/startup.log
 `;
 
-  // Common setup for both fresh and restored environments
+  // GitHub token credential setup for developer user
+  const devTokenSetup = githubToken
+    ? `
+# Configure GitHub credentials for developer user
+echo "https://${username}:${githubToken}@github.com" > /home/developer/.git-credentials
+chmod 600 /home/developer/.git-credentials
+chown developer:developer /home/developer/.git-credentials
+echo "✓ GitHub credentials configured for developer (owner: ${username})" >> /var/log/startup.log
+`
+    : `
+echo "⚠ No GitHub token provided" >> /var/log/startup.log
+`;
+
+  // Common setup - user logs in as 'developer' directly
+  // This avoids all permission issues since everything is owned by developer
   const commonSetup = `#!/bin/bash
 set -e
 
@@ -759,45 +773,27 @@ echo "Starting dev environment for ${username} (restore=${isRestore})" >> /var/l
 # Ensure Docker is running
 systemctl start docker
 
-# Add user to docker and developer groups
-usermod -aG docker ${username} || true
-usermod -aG developer ${username} || true
-
-# Manually fetch and add SSH public keys from GitHub
-# (GCP metadata ssh-keys doesn't work reliably for dynamically created users)
+# Add user's SSH public keys to developer's authorized_keys
+# User will SSH as 'developer' but we know who they are from the instance metadata
 echo "Fetching SSH keys from GitHub for ${username}..." >> /var/log/startup.log
-mkdir -p /home/${username}/.ssh
-curl -s "https://github.com/${username}.keys" > /home/${username}/.ssh/authorized_keys
-chmod 755 /home/${username}
-chmod 700 /home/${username}/.ssh
-chmod 600 /home/${username}/.ssh/authorized_keys
-chown -R ${username}:${username} /home/${username}/.ssh
-SSH_KEY_COUNT=$(wc -l < /home/${username}/.ssh/authorized_keys)
-echo "✓ Added \${SSH_KEY_COUNT} SSH keys for ${username}" >> /var/log/startup.log
+mkdir -p /home/developer/.ssh
+curl -s "https://github.com/${username}.keys" > /home/developer/.ssh/authorized_keys
+chmod 700 /home/developer/.ssh
+chmod 600 /home/developer/.ssh/authorized_keys
+chown -R developer:developer /home/developer/.ssh
+SSH_KEY_COUNT=$(wc -l < /home/developer/.ssh/authorized_keys)
+echo "✓ Added \${SSH_KEY_COUNT} SSH keys for developer (owner: ${username})" >> /var/log/startup.log
 
-# Make workspace accessible to all users
-chmod 755 /home/developer
-chmod -R a+rX /home/developer/workspace
-chmod -R g+w /home/developer/workspace
+# Configure git for developer user with the owner's identity
+sudo -u developer HOME=/home/developer git config --global user.name "${username}"
+sudo -u developer HOME=/home/developer git config --global user.email "${username}@users.noreply.github.com"
+sudo -u developer HOME=/home/developer git config --global credential.helper store
 
-# Create symlink in user's home directory to the shared workspace
-ln -sf /home/developer/workspace /home/${username}/workspace
-chown -h ${username}:${username} /home/${username}/workspace
-
-# Configure git safe directory for root (needed for sudo git commands)
-git config --global --add safe.directory /home/developer/workspace
-
-# Configure git for the user (set HOME explicitly for sudo -u)
-sudo -u ${username} HOME=/home/${username} git config --global --add safe.directory /home/developer/workspace
-sudo -u ${username} HOME=/home/${username} git config --global user.name "${username}"
-sudo -u ${username} HOME=/home/${username} git config --global user.email "${username}@users.noreply.github.com"
-sudo -u ${username} HOME=/home/${username} git config --global credential.helper store
-
-# Use HTTPS URL for git push with stored credentials
-cd /home/developer/workspace
+# Set HTTPS URL for git push with stored credentials
+cd /home/developer/workspace/teable-ee
 git remote set-url origin https://github.com/teableio/teable-ee.git || true
 
-${tokenSetup}
+${devTokenSetup}
 `;
 
   // Only run git pull and pnpm install for fresh environments

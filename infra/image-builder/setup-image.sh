@@ -76,42 +76,57 @@ echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Clone teable-ee repository
 echo ""
-echo "=== Cloning teable-ee repository ==="
+echo "=== Creating workspace directory ==="
 cd /home/developer
+mkdir -p workspace
+chown developer:developer workspace
 
 # Check if GITHUB_TOKEN is available (from instance metadata)
 GITHUB_TOKEN=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/attributes/github-token" -H "Metadata-Flavor: Google" 2>/dev/null || echo "")
 
+# Clone teable-ee (main project)
+echo ""
+echo "=== Cloning teable-ee repository ==="
 if [ -n "$GITHUB_TOKEN" ]; then
   echo "Using GitHub token for authentication"
-  sudo -u developer git clone --depth 1 -b develop "https://${GITHUB_TOKEN}@github.com/teableio/teable-ee.git" workspace
+  sudo -u developer git clone --depth 1 -b develop "https://${GITHUB_TOKEN}@github.com/teableio/teable-ee.git" workspace/teable-ee
   # Remove token from git remote for security
-  cd workspace
+  cd workspace/teable-ee
   sudo -u developer git remote set-url origin https://github.com/teableio/teable-ee.git
   cd /home/developer
 else
   echo "WARNING: No GitHub token found. Trying SSH key or falling back to public repo."
-  sudo -u developer git clone --depth 1 -b develop git@github.com:teableio/teable-ee.git workspace || \
-  sudo -u developer git clone --depth 1 -b develop https://github.com/teableio/teable-ee.git workspace || {
+  sudo -u developer git clone --depth 1 -b develop git@github.com:teableio/teable-ee.git workspace/teable-ee || \
+  sudo -u developer git clone --depth 1 -b develop https://github.com/teableio/teable-ee.git workspace/teable-ee || {
     echo "Failed to clone teable-ee (private repo). Cloning teable instead."
-    sudo -u developer git clone --depth 1 -b develop https://github.com/teableio/teable.git workspace
+    sudo -u developer git clone --depth 1 -b develop https://github.com/teableio/teable.git workspace/teable-ee
   }
 fi
 
-# Prepare pnpm version specified in project's package.json
+# Clone docs (public)
+echo ""
+echo "=== Cloning teable-docs repository ==="
+sudo -u developer git clone --depth 1 https://github.com/teableio/teable-docs.git workspace/teable-docs || echo "Failed to clone teable-docs"
+
+# Clone teable-official (public website)
+echo ""
+echo "=== Cloning teable-official repository ==="
+sudo -u developer git clone --depth 1 https://github.com/teableio/teable-official.git workspace/teable-official || echo "Failed to clone teable-official"
+
+# Prepare pnpm version specified in teable-ee's package.json
 echo ""
 echo "=== Preparing pnpm from project config ==="
-cd /home/developer/workspace
+cd /home/developer/workspace/teable-ee
 PNPM_VERSION=$(node -p "require('./package.json').packageManager?.split('@')[1] || '9.13.0'")
 echo "Project requires pnpm@${PNPM_VERSION}"
 corepack prepare pnpm@${PNPM_VERSION} --activate
 
-# Install dependencies
+# Install dependencies for teable-ee
 echo ""
-echo "=== Installing project dependencies ==="
-sudo -u developer bash -c 'export HOME=/home/developer && pnpm install --frozen-lockfile' || {
+echo "=== Installing teable-ee dependencies ==="
+sudo -u developer bash -c 'export HOME=/home/developer && cd /home/developer/workspace/teable-ee && pnpm install --frozen-lockfile' || {
   echo "pnpm install with frozen lockfile failed, trying without..."
-  sudo -u developer bash -c 'export HOME=/home/developer && pnpm install'
+  sudo -u developer bash -c 'export HOME=/home/developer && cd /home/developer/workspace/teable-ee && pnpm install'
 }
 
 # Set correct ownership and permissions
@@ -124,13 +139,13 @@ chmod -R a+rX /home/developer/workspace
 chmod -R g+w /home/developer/workspace
 
 # Configure git safe.directory for all users (prevents "dubious ownership" errors)
-# This is needed because workspace is owned by developer but accessed by other users
-# Must be done BEFORE any git commands that access the workspace
-git config --system --add safe.directory /home/developer/workspace
+git config --system --add safe.directory /home/developer/workspace/teable-ee
+git config --system --add safe.directory /home/developer/workspace/teable-docs
+git config --system --add safe.directory /home/developer/workspace/teable-official
 git config --system --add safe.directory '*'
 
-# Save commit info for image description
-cd /home/developer/workspace
+# Save commit info for image description (from teable-ee)
+cd /home/developer/workspace/teable-ee
 COMMIT_SHA=$(git rev-parse --short HEAD)
 COMMIT_MSG=$(git log -1 --pretty=format:'%s' | head -c 100)
 COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
@@ -156,11 +171,11 @@ docker pull redis:7 || true
 # Initialize database and start Docker containers
 echo ""
 echo "=== Initializing database (make switch-db-mode) ==="
-cd /home/developer/workspace
+cd /home/developer/workspace/teable-ee
 
 # Run switch-db-mode with auto-select postgres (option 1)
 # This keeps sync with Makefile changes
-sudo -u developer bash -c 'cd /home/developer/workspace && echo "1" | make switch-db-mode'
+sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee && echo "1" | make switch-db-mode'
 
 # Configure docker containers to auto-restart on boot
 docker update --restart=unless-stopped teable-postgres teable-cache || true
@@ -170,8 +185,8 @@ echo "✓ Database initialized successfully"
 # Install Playwright dependencies (for testing)
 echo ""
 echo "=== Installing Playwright dependencies ==="
-sudo -u developer bash -c 'cd /home/developer/workspace && npx playwright install-deps' || true
-sudo -u developer bash -c 'cd /home/developer/workspace && npx playwright install' || true
+sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee && npx playwright install-deps' || true
+sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee && npx playwright install' || true
 
 # Configure SSH
 echo ""

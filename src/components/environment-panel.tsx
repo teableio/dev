@@ -293,16 +293,16 @@ export function EnvironmentPanel({
   }
 
   const sshHost = "teable-dev";
-  const sshTarget = `${username}@${environment.externalIp}`;
+  // Login as 'developer' user - this avoids all permission issues
+  // The user's GitHub SSH key is added to developer's authorized_keys
+  const sshTarget = `developer@${environment.externalIp}`;
   const sshCommand = `ssh ${sshTarget}`;
   
-  // Use direct user@IP format - works without SSH config if keys are set up
-  // windowId=_blank opens in a new window instead of reusing current
-  // Use user's home directory with symlink to /home/developer/workspace
-  const workspacePath = `/home/${username}/workspace`;
+  // Workspace path for teable-ee (main project)
+  const workspacePath = `/home/developer/workspace/teable-ee`;
   const vscodeUrl = `vscode://vscode-remote/ssh-remote+${sshTarget}${workspacePath}?windowId=_blank`;
   const cursorUrl = `cursor://vscode-remote/ssh-remote+${sshTarget}${workspacePath}?windowId=_blank`;
-  const antigravityUrl = `antigravity://vscode-remote/ssh-remote+${sshTarget}/home/developer/workspace?windowId=_blank`;
+  const antigravityUrl = `antigravity://vscode-remote/ssh-remote+${sshTarget}${workspacePath}?windowId=_blank`;
   
   // Troubleshooting script - clears old host keys and sets up SSH config
   const sshFullSetup = `# Clear old host key and configure SSH
@@ -318,7 +318,7 @@ else
 
 Host ${sshHost}
   HostName ${environment.externalIp}
-  User ${username}
+  User developer
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
 EOF
