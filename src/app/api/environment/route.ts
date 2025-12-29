@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { auth } from "@/auth";
 import {
   createDevEnvironment,
   getDevEnvironment,
   deleteDevEnvironment,
   stopDevEnvironment,
+  MACHINE_CONFIGS,
 } from "@/lib/gcp";
 
 // GET /api/environment - Get current user's environment
@@ -17,7 +18,7 @@ export async function GET() {
 
   try {
     const environment = await getDevEnvironment(session.username);
-    return NextResponse.json({ environment });
+    return NextResponse.json({ environment, machineConfigs: MACHINE_CONFIGS });
   } catch (error) {
     console.error("Error getting environment:", error);
     return NextResponse.json(
@@ -28,7 +29,7 @@ export async function GET() {
 }
 
 // POST /api/environment - Create a new environment
-export async function POST() {
+export async function POST(request: NextRequest) {
   const session = await auth();
 
   if (!session?.username) {
@@ -36,11 +37,21 @@ export async function POST() {
   }
 
   try {
+    // Parse request body for optional machineType
+    let machineType: string | undefined;
+    try {
+      const body = await request.json();
+      machineType = body.machineType;
+    } catch {
+      // No body or invalid JSON - use default
+    }
+
     // Pass user's GitHub OAuth token for git push access
-    const environment = await createDevEnvironment(
-      session.username,
-      session.accessToken
-    );
+    const environment = await createDevEnvironment({
+      username: session.username,
+      githubToken: session.accessToken,
+      machineType,
+    });
     return NextResponse.json({ environment });
   } catch (error) {
     console.error("Error creating environment:", error);

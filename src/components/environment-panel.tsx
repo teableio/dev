@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { DevEnvironment, BaseImageInfo } from "@/lib/gcp";
+import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "@/lib/machine-configs";
 import {
   Server,
   Play,
@@ -20,6 +21,8 @@ import {
   AlertCircle,
   RotateCcw,
   Package,
+  ChevronDown,
+  Zap,
 } from "lucide-react";
 
 interface EnvironmentPanelProps {
@@ -41,6 +44,8 @@ export function EnvironmentPanel({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [selectedMachineType, setSelectedMachineType] = useState(DEFAULT_MACHINE_TYPE);
+  const [showMachineSelector, setShowMachineSelector] = useState(false);
   const router = useRouter();
 
   // Poll for environment status until target state is reached
@@ -91,6 +96,8 @@ export function EnvironmentPanel({
     try {
       const response = await fetch("/api/environment", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machineType: selectedMachineType }),
       });
 
       const data = await response.json();
@@ -233,6 +240,8 @@ export function EnvironmentPanel({
     });
   };
 
+  const selectedConfig = MACHINE_CONFIGS.find(c => c.machineType === selectedMachineType) || MACHINE_CONFIGS[0];
+
   if (!environment) {
     return (
       <div className="rounded-3xl bg-white/[0.03] border border-white/[0.05] p-12 text-center">
@@ -241,10 +250,79 @@ export function EnvironmentPanel({
         </div>
 
         <h2 className="text-2xl font-semibold mb-3">No Environment Running</h2>
-        <p className="text-slate-400 mb-8 max-w-md mx-auto">
-          Create a powerful cloud development environment with 8 vCPU, 32GB RAM,
-          and the latest Teable codebase pre-installed.
+        <p className="text-slate-400 mb-6 max-w-md mx-auto">
+          Create a powerful cloud development environment with the latest Teable codebase pre-installed.
         </p>
+
+        {/* Machine Type Selector */}
+        <div className="mb-8 max-w-md mx-auto">
+          <label className="block text-sm font-medium text-slate-400 mb-3">
+            Select Machine Type
+          </label>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowMachineSelector(!showMachineSelector)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/50 transition-colors text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center">
+                  <Zap className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="font-medium text-white">{selectedConfig.displayName}</div>
+                  <div className="text-xs text-slate-400">
+                    {selectedConfig.vCPU} vCPU • {selectedConfig.memoryGB} GB RAM
+                  </div>
+                </div>
+              </div>
+              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showMachineSelector ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showMachineSelector && (
+              <div className="absolute top-full left-0 right-0 mt-2 py-2 rounded-xl bg-slate-800 border border-slate-700 shadow-xl z-10">
+                {MACHINE_CONFIGS.map((config) => (
+                  <button
+                    key={config.machineType}
+                    onClick={() => {
+                      setSelectedMachineType(config.machineType);
+                      setShowMachineSelector(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-700/50 transition-colors text-left ${
+                      config.machineType === selectedMachineType ? 'bg-emerald-500/10' : ''
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      config.machineType === selectedMachineType 
+                        ? 'bg-gradient-to-br from-emerald-500/30 to-cyan-500/30' 
+                        : 'bg-slate-700'
+                    }`}>
+                      <Zap className={`w-5 h-5 ${
+                        config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-slate-400'
+                      }`} />
+                    </div>
+                    <div className="flex-1">
+                      <div className={`font-medium ${
+                        config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-white'
+                      }`}>
+                        {config.displayName}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {config.vCPU} vCPU • {config.memoryGB} GB RAM • {config.diskType}
+                      </div>
+                    </div>
+                    {config.machineType === selectedMachineType && (
+                      <Check className="w-5 h-5 text-emerald-400" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            C4 offers best performance. Falls back to C3/N2 if quota unavailable.
+          </p>
+        </div>
 
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">

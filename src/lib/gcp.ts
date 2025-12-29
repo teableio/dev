@@ -8,29 +8,18 @@ import {
   RegionOperationsClient,
   ImagesClient,
 } from "@google-cloud/compute";
+import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "./machine-configs";
+import type { MachineConfig } from "./machine-configs";
+
+// Re-export for convenience
+export { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE };
+export type { MachineConfig };
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "teable-666";
 const ZONE = process.env.GCP_ZONE || "asia-southeast1-a"; // Singapore
 const REGION = ZONE.replace(/-[a-z]$/, ""); // asia-southeast1
 const IMAGE_FAMILY = process.env.GCP_IMAGE_FAMILY || "teable-dev";
 const DISK_SIZE_GB = 100;
-
-// Machine type configurations with fallback order
-// C4 requires hyperdisk-balanced, C3/N2 use pd-ssd
-interface MachineConfig {
-  machineType: string;
-  diskType: string;
-  displayName: string;
-}
-
-const MACHINE_CONFIGS: MachineConfig[] = [
-  { machineType: "c4-standard-8", diskType: "hyperdisk-balanced", displayName: "C4-Standard-8 (8 vCPU, 30GB)" },
-  { machineType: "c3-standard-8", diskType: "pd-ssd", displayName: "C3-Standard-8 (8 vCPU, 32GB)" },
-  { machineType: "n2-standard-8", diskType: "pd-ssd", displayName: "N2-Standard-8 (8 vCPU, 32GB)" },
-];
-
-// Default machine type for display purposes
-const DEFAULT_MACHINE_TYPE = MACHINE_CONFIGS[0].machineType;
 
 // Initialize GCP clients with credentials from environment
 function getGCPCredentials() {
@@ -305,10 +294,24 @@ export async function getUserSSHKeys(username: string): Promise<string[]> {
   }
 }
 
+export interface CreateEnvironmentOptions {
+  username: string;
+  githubToken?: string;
+  machineType?: string; // If specified, use only this machine type (no fallback)
+}
+
 export async function createDevEnvironment(
-  username: string,
+  usernameOrOptions: string | CreateEnvironmentOptions,
   githubToken?: string
 ): Promise<DevEnvironment> {
+  // Support both old signature and new options object
+  const options: CreateEnvironmentOptions = typeof usernameOrOptions === 'string' 
+    ? { username: usernameOrOptions, githubToken }
+    : usernameOrOptions;
+  
+  const { username, machineType: requestedMachineType } = options;
+  const token = typeof usernameOrOptions === 'string' ? githubToken : options.githubToken;
+  
   const instanceName = getInstanceName(username);
   const snapshotName = getSnapshotName(username);
 
@@ -332,10 +335,21 @@ export async function createDevEnvironment(
   // Get or create static IP for this user
   const staticIP = await getOrCreateStaticIP(username);
 
+  // Determine which machine configs to try
+  // If user specified a machine type, use only that one
+  // Otherwise, try all machine types in fallback order
+  const configsToTry = requestedMachineType
+    ? MACHINE_CONFIGS.filter(c => c.machineType === requestedMachineType)
+    : MACHINE_CONFIGS;
+  
+  if (configsToTry.length === 0) {
+    throw new Error(`Invalid machine type: ${requestedMachineType}`);
+  }
+
   // Try each machine type in order until one succeeds
   let lastError: Error | null = null;
   
-  for (const config of MACHINE_CONFIGS) {
+  for (const config of configsToTry) {
     console.log(`Trying to create instance with ${config.machineType}...`);
     
     // Determine disk configuration - from snapshot or fresh image
@@ -402,7 +416,7 @@ export async function createDevEnvironment(
               },
               {
                 key: "startup-script",
-                value: getStartupScript(username, hasSnap, githubToken),
+                value: getStartupScript(username, hasSnap, token),
               },
             ],
           },
