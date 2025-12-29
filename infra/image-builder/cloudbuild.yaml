@@ -128,7 +128,7 @@ steps:
         done
 
 substitutions:
-  _ZONE: 'asia-east2-a'
+  _ZONE: 'asia-southeast1-a'
   _IMAGE_FAMILY: 'teable-dev'
   _SETUP_SCRIPT: |
     #!/bin/bash

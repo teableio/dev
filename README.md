@@ -47,7 +47,7 @@ pnpm dev
 │   2. GitHub OAuth login (verify teable-ee access)               │
 │   3. Click create environment                                   │
 │   4. Auto-fetch GitHub SSH public keys                          │
-│   5. Create GCP VM (asia-east2, c4-standard-8)                  │
+│   5. Create GCP VM (asia-southeast1, c4-standard-8)             │
 │   6. Return connection info (SSH / VS Code / Cursor)            │
 │   7. Auto-destroy after 12 hours of inactivity                  │
 └─────────────────────────────────────────────────────────────────┘

@@ -12,7 +12,7 @@
 set -e
 
 PROJECT_ID="${GCP_PROJECT_ID:-teable-666}"
-ZONE="${GCP_ZONE:-asia-east2-a}"
+ZONE="${GCP_ZONE:-asia-southeast1-a}"
 IMAGE_FAMILY="teable-dev"
 SOURCE_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 SOURCE_IMAGE_PROJECT="ubuntu-os-cloud"

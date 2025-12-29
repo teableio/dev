@@ -10,7 +10,7 @@ import {
 } from "@google-cloud/compute";
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "teable-666";
-const ZONE = process.env.GCP_ZONE || "asia-east2-a"; // Hong Kong
+const ZONE = process.env.GCP_ZONE || "asia-southeast1-a"; // Singapore
 const REGION = ZONE.replace(/-[a-z]$/, ""); // asia-east2
 const MACHINE_TYPE = process.env.GCP_MACHINE_TYPE || "c4-standard-8";
 const IMAGE_FAMILY = process.env.GCP_IMAGE_FAMILY || "teable-dev";
