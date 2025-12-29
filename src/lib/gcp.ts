@@ -386,6 +386,10 @@ export async function getDevEnvironment(
     const getMetadata = (key: string) =>
       metadata.find((m) => m.key === key)?.value || "";
 
+    // Extract machine type from full URL: zones/xxx/machineTypes/c4-standard-8 -> c4-standard-8
+    const machineTypeUrl = instance.machineType || "";
+    const actualMachineType = machineTypeUrl.split("/").pop() || DEFAULT_MACHINE_TYPE;
+
     return {
       name: instance.name!,
       instanceId: getMetadata("instance-id") || DEFAULT_INSTANCE_ID,
@@ -396,7 +400,7 @@ export async function getDevEnvironment(
       createdAt: getMetadata("created-at"),
       lastActiveAt: getMetadata("last-active-at"),
       username: getMetadata("username"),
-      machineType: DEFAULT_MACHINE_TYPE,
+      machineType: actualMachineType,
       zone: ZONE,
       hasSnapshot: hasSnap,
     };
@@ -578,6 +582,10 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
       const username = getMetadata("username");
       const instanceId = getMetadata("instance-id") || DEFAULT_INSTANCE_ID;
       const hasSnap = username ? await snapshotExists(username, instanceId) : false;
+      
+      // Extract machine type from full URL
+      const machineTypeUrl = instance.machineType || "";
+      const actualMachineType = machineTypeUrl.split("/").pop() || DEFAULT_MACHINE_TYPE;
 
       environments.push({
         name: instance.name!,
@@ -589,7 +597,7 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
         createdAt: getMetadata("created-at"),
         lastActiveAt: getMetadata("last-active-at"),
         username: username,
-        machineType: DEFAULT_MACHINE_TYPE,
+        machineType: actualMachineType,
         zone: ZONE,
         hasSnapshot: hasSnap,
       });
@@ -621,6 +629,10 @@ export async function listUserEnvironments(username: string): Promise<DevEnviron
       
       const instanceId = getMetadata("instance-id") || DEFAULT_INSTANCE_ID;
       const hasSnap = await snapshotExists(username, instanceId);
+      
+      // Extract machine type from full URL
+      const machineTypeUrl = instance.machineType || "";
+      const actualMachineType = machineTypeUrl.split("/").pop() || DEFAULT_MACHINE_TYPE;
 
       environments.push({
         name: instance.name!,
@@ -632,7 +644,7 @@ export async function listUserEnvironments(username: string): Promise<DevEnviron
         createdAt: getMetadata("created-at"),
         lastActiveAt: getMetadata("last-active-at"),
         username: username,
-        machineType: DEFAULT_MACHINE_TYPE,
+        machineType: actualMachineType,
         zone: ZONE,
         hasSnapshot: hasSnap,
       });

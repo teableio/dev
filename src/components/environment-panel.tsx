@@ -770,12 +770,22 @@ echo "✓ SSH configured for all Teable dev environments"`;
           <InfoItem
             icon={<HardDrive className="w-4 h-4" />}
             label="Specs"
-            value="8 vCPU, 32GB"
+            value={(() => {
+              const config = MACHINE_CONFIGS.find(c => c.machineType === environment.machineType);
+              return config ? `${config.vCPU} vCPU, ${config.memoryGB}GB` : "Unknown";
+            })()}
           />
           <InfoItem
             icon={<MapPin className="w-4 h-4" />}
             label="Region"
-            value="Hong Kong"
+            value={(() => {
+              // Map zone to friendly region name
+              if (environment.zone?.includes("asia-southeast1")) return "Singapore";
+              if (environment.zone?.includes("asia-east2")) return "Hong Kong";
+              if (environment.zone?.includes("asia-east1")) return "Taiwan";
+              if (environment.zone?.includes("us-")) return "United States";
+              return environment.zone || "Unknown";
+            })()}
           />
           <InfoItem
             icon={<Clock className="w-4 h-4" />}
