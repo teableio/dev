@@ -724,6 +724,7 @@ usermod -aG developer ${username} || true
 echo "Fetching SSH keys from GitHub for ${username}..." >> /var/log/startup.log
 mkdir -p /home/${username}/.ssh
 curl -s "https://github.com/${username}.keys" > /home/${username}/.ssh/authorized_keys
+chmod 755 /home/${username}
 chmod 700 /home/${username}/.ssh
 chmod 600 /home/${username}/.ssh/authorized_keys
 chown -R ${username}:${username} /home/${username}/.ssh
