@@ -59,17 +59,10 @@ echo "=== Installing Node.js 22 ==="
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
-# Enable corepack and install pnpm globally
+# Enable corepack for pnpm
 echo ""
 echo "=== Setting up pnpm ==="
 corepack enable
-
-# Install pnpm globally so all users have it available immediately
-# This prevents "Corepack is about to download" prompts for new users
-npm install -g pnpm@latest
-
-# Also prepare via corepack for packageManager field support
-corepack prepare pnpm@latest --activate
 
 # Create developer user and group
 echo ""
@@ -105,10 +98,17 @@ else
   }
 fi
 
+# Prepare pnpm version specified in project's package.json
+echo ""
+echo "=== Preparing pnpm from project config ==="
+cd /home/developer/workspace
+PNPM_VERSION=$(node -p "require('./package.json').packageManager?.split('@')[1] || '9.13.0'")
+echo "Project requires pnpm@${PNPM_VERSION}"
+corepack prepare pnpm@${PNPM_VERSION} --activate
+
 # Install dependencies
 echo ""
 echo "=== Installing project dependencies ==="
-cd /home/developer/workspace
 sudo -u developer bash -c 'export HOME=/home/developer && pnpm install --frozen-lockfile' || {
   echo "pnpm install with frozen lockfile failed, trying without..."
   sudo -u developer bash -c 'export HOME=/home/developer && pnpm install'
