@@ -58,7 +58,7 @@ gcloud compute instances create "$INSTANCE_NAME" \
   --image-family="$SOURCE_IMAGE_FAMILY" \
   --image-project="$SOURCE_IMAGE_PROJECT" \
   --boot-disk-size=100GB \
-  --boot-disk-type=pd-ssd \
+  --boot-disk-type=hyperdisk-balanced \
   $METADATA_ARGS \
   --scopes=cloud-platform \
   --quiet

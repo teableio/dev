@@ -325,7 +325,7 @@ export async function createDevEnvironment(
         initializeParams: {
           sourceSnapshot: `projects/${PROJECT_ID}/global/snapshots/${snapshotName}`,
           diskSizeGb: DISK_SIZE_GB.toString(),
-          diskType: `zones/${ZONE}/diskTypes/pd-ssd`,
+          diskType: `zones/${ZONE}/diskTypes/hyperdisk-balanced`,
         },
       }
     : {
@@ -335,7 +335,7 @@ export async function createDevEnvironment(
         initializeParams: {
           sourceImage: `projects/${PROJECT_ID}/global/images/family/${IMAGE_FAMILY}`,
           diskSizeGb: DISK_SIZE_GB.toString(),
-          diskType: `zones/${ZONE}/diskTypes/pd-ssd`,
+          diskType: `zones/${ZONE}/diskTypes/hyperdisk-balanced`,
         },
       };
 

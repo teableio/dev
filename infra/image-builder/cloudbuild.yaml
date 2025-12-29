@@ -19,7 +19,7 @@ steps:
           --image-family="ubuntu-2404-lts-amd64" \
           --image-project="ubuntu-os-cloud" \
           --boot-disk-size=100GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-type=hyperdisk-balanced \
           --scopes=cloud-platform \
           --metadata=startup-script='${_SETUP_SCRIPT}'
         
