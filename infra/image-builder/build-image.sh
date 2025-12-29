@@ -54,11 +54,11 @@ echo "=== Creating temporary build instance ==="
 gcloud compute instances create "$INSTANCE_NAME" \
   --project="$PROJECT_ID" \
   --zone="$ZONE" \
-  --machine-type="c4-standard-4" \
+  --machine-type="n2-standard-4" \
   --image-family="$SOURCE_IMAGE_FAMILY" \
   --image-project="$SOURCE_IMAGE_PROJECT" \
   --boot-disk-size=100GB \
-  --boot-disk-type=hyperdisk-balanced \
+  --boot-disk-type=pd-ssd \
   $METADATA_ARGS \
   --scopes=cloud-platform \
   --quiet

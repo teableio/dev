@@ -11,10 +11,26 @@ import {
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "teable-666";
 const ZONE = process.env.GCP_ZONE || "asia-southeast1-a"; // Singapore
-const REGION = ZONE.replace(/-[a-z]$/, ""); // asia-east2
-const MACHINE_TYPE = process.env.GCP_MACHINE_TYPE || "c4-standard-8";
+const REGION = ZONE.replace(/-[a-z]$/, ""); // asia-southeast1
 const IMAGE_FAMILY = process.env.GCP_IMAGE_FAMILY || "teable-dev";
 const DISK_SIZE_GB = 100;
+
+// Machine type configurations with fallback order
+// C4 requires hyperdisk-balanced, C3/N2 use pd-ssd
+interface MachineConfig {
+  machineType: string;
+  diskType: string;
+  displayName: string;
+}
+
+const MACHINE_CONFIGS: MachineConfig[] = [
+  { machineType: "c4-standard-8", diskType: "hyperdisk-balanced", displayName: "C4-Standard-8 (8 vCPU, 30GB)" },
+  { machineType: "c3-standard-8", diskType: "pd-ssd", displayName: "C3-Standard-8 (8 vCPU, 32GB)" },
+  { machineType: "n2-standard-8", diskType: "pd-ssd", displayName: "N2-Standard-8 (8 vCPU, 32GB)" },
+];
+
+// Default machine type for display purposes
+const DEFAULT_MACHINE_TYPE = MACHINE_CONFIGS[0].machineType;
 
 // Initialize GCP clients with credentials from environment
 function getGCPCredentials() {
@@ -316,99 +332,127 @@ export async function createDevEnvironment(
   // Get or create static IP for this user
   const staticIP = await getOrCreateStaticIP(username);
 
-  // Determine disk configuration - from snapshot or fresh image
-  const diskConfig = hasSnap
-    ? {
-        // Restore from snapshot
-        boot: true,
-        autoDelete: true,
-        initializeParams: {
-          sourceSnapshot: `projects/${PROJECT_ID}/global/snapshots/${snapshotName}`,
-          diskSizeGb: DISK_SIZE_GB.toString(),
-          diskType: `zones/${ZONE}/diskTypes/hyperdisk-balanced`,
-        },
-      }
-    : {
-        // Fresh from base image
-        boot: true,
-        autoDelete: true,
-        initializeParams: {
-          sourceImage: `projects/${PROJECT_ID}/global/images/family/${IMAGE_FAMILY}`,
-          diskSizeGb: DISK_SIZE_GB.toString(),
-          diskType: `zones/${ZONE}/diskTypes/hyperdisk-balanced`,
-        },
-      };
+  // Try each machine type in order until one succeeds
+  let lastError: Error | null = null;
+  
+  for (const config of MACHINE_CONFIGS) {
+    console.log(`Trying to create instance with ${config.machineType}...`);
+    
+    // Determine disk configuration - from snapshot or fresh image
+    const diskConfig = hasSnap
+      ? {
+          // Restore from snapshot
+          boot: true,
+          autoDelete: true,
+          initializeParams: {
+            sourceSnapshot: `projects/${PROJECT_ID}/global/snapshots/${snapshotName}`,
+            diskSizeGb: DISK_SIZE_GB.toString(),
+            diskType: `zones/${ZONE}/diskTypes/${config.diskType}`,
+          },
+        }
+      : {
+          // Fresh from base image
+          boot: true,
+          autoDelete: true,
+          initializeParams: {
+            sourceImage: `projects/${PROJECT_ID}/global/images/family/${IMAGE_FAMILY}`,
+            diskSizeGb: DISK_SIZE_GB.toString(),
+            diskType: `zones/${ZONE}/diskTypes/${config.diskType}`,
+          },
+        };
 
-  // Create the instance
-  const [operation] = await instancesClient.insert({
-    project: PROJECT_ID,
-    zone: ZONE,
-    instanceResource: {
-      name: instanceName,
-      machineType: `zones/${ZONE}/machineTypes/${MACHINE_TYPE}`,
-      disks: [diskConfig],
-      networkInterfaces: [
-        {
-          network: "global/networks/default",
-          accessConfigs: [
+    try {
+      // Create the instance
+      const [operation] = await instancesClient.insert({
+        project: PROJECT_ID,
+        zone: ZONE,
+        instanceResource: {
+          name: instanceName,
+          machineType: `zones/${ZONE}/machineTypes/${config.machineType}`,
+          disks: [diskConfig],
+          networkInterfaces: [
             {
-              name: "External NAT",
-              type: "ONE_TO_ONE_NAT",
-              natIP: staticIP, // Use reserved static IP
+              network: "global/networks/default",
+              accessConfigs: [
+                {
+                  name: "External NAT",
+                  type: "ONE_TO_ONE_NAT",
+                  natIP: staticIP, // Use reserved static IP
+                },
+              ],
+            },
+          ],
+          metadata: {
+            items: [
+              {
+                key: "ssh-keys",
+                value: sshKeys.join("\n"),
+              },
+              {
+                key: "created-at",
+                value: now,
+              },
+              {
+                key: "last-active-at",
+                value: now,
+              },
+              {
+                key: "username",
+                value: username,
+              },
+              {
+                key: "startup-script",
+                value: getStartupScript(username, hasSnap, githubToken),
+              },
+            ],
+          },
+          labels: {
+            purpose: "dev-env",
+            user: username.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+          },
+          tags: {
+            items: ["dev-env", "http-server", "https-server", "allow-ssh"],
+          },
+          serviceAccounts: [
+            {
+              email: "default",
+              scopes: ["https://www.googleapis.com/auth/cloud-platform"],
             },
           ],
         },
-      ],
-      metadata: {
-        items: [
-          {
-            key: "ssh-keys",
-            value: sshKeys.join("\n"),
-          },
-          {
-            key: "created-at",
-            value: now,
-          },
-          {
-            key: "last-active-at",
-            value: now,
-          },
-          {
-            key: "username",
-            value: username,
-          },
-          {
-            key: "startup-script",
-            value: getStartupScript(username, hasSnap, githubToken),
-          },
-        ],
-      },
-      labels: {
-        purpose: "dev-env",
-        user: username.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
-      },
-      tags: {
-        items: ["dev-env", "http-server", "https-server", "allow-ssh"],
-      },
-      serviceAccounts: [
-        {
-          email: "default",
-          scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-        },
-      ],
-    },
-  });
+      });
 
-  // Wait for the operation to complete
-  await waitForOperation(operation.name!);
+      // Wait for the operation to complete
+      await waitForOperation(operation.name!);
+      
+      console.log(`Successfully created instance with ${config.machineType}`);
 
-  // Get the created instance
-  const env = await getDevEnvironment(username);
-  if (!env) {
-    throw new Error("Failed to create environment");
+      // Get the created instance
+      const env = await getDevEnvironment(username);
+      if (!env) {
+        throw new Error("Failed to create environment");
+      }
+
+      return env;
+    } catch (error) {
+      const err = error as { message?: string; code?: number };
+      const errorMessage = err.message || String(error);
+      
+      // Check if it's a quota error - try next machine type
+      if (errorMessage.includes("Quota") || errorMessage.includes("quota") || 
+          errorMessage.includes("CPUS_PER_VM_FAMILY") || errorMessage.includes("exceeded")) {
+        console.log(`Quota exceeded for ${config.machineType}, trying next option...`);
+        lastError = error as Error;
+        continue;
+      }
+      
+      // For other errors, throw immediately
+      throw error;
+    }
   }
 
-  return env;
+  // All machine types failed
+  throw lastError || new Error("Failed to create environment: all machine types exhausted");
 }
 
 export async function getDevEnvironment(
@@ -437,7 +481,7 @@ export async function getDevEnvironment(
       createdAt: getMetadata("created-at"),
       lastActiveAt: getMetadata("last-active-at"),
       username: getMetadata("username"),
-      machineType: MACHINE_TYPE,
+      machineType: DEFAULT_MACHINE_TYPE,
       zone: ZONE,
       hasSnapshot: hasSnap,
     };
@@ -469,7 +513,7 @@ export async function getDevEnvironment(
           createdAt: "",
           lastActiveAt: "",
           username: username,
-          machineType: MACHINE_TYPE,
+          machineType: DEFAULT_MACHINE_TYPE,
           zone: ZONE,
           hasSnapshot: true,
         };
@@ -640,7 +684,7 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
         createdAt: getMetadata("created-at"),
         lastActiveAt: getMetadata("last-active-at"),
         username: username,
-        machineType: MACHINE_TYPE,
+        machineType: DEFAULT_MACHINE_TYPE,
         zone: ZONE,
         hasSnapshot: hasSnap,
       });
