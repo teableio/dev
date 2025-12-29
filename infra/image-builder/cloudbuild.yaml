@@ -15,7 +15,7 @@ steps:
         gcloud compute instances create "$INSTANCE_NAME" \
           --project="${PROJECT_ID}" \
           --zone="${_ZONE}" \
-          --machine-type="c3-standard-4" \
+          --machine-type="c4-standard-4" \
           --image-family="ubuntu-2404-lts-amd64" \
           --image-project="ubuntu-os-cloud" \
           --boot-disk-size=100GB \
