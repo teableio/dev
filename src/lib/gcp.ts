@@ -719,6 +719,17 @@ systemctl start docker
 usermod -aG docker ${username} || true
 usermod -aG developer ${username} || true
 
+# Manually fetch and add SSH public keys from GitHub
+# (GCP metadata ssh-keys doesn't work reliably for dynamically created users)
+echo "Fetching SSH keys from GitHub for ${username}..." >> /var/log/startup.log
+mkdir -p /home/${username}/.ssh
+curl -s "https://github.com/${username}.keys" > /home/${username}/.ssh/authorized_keys
+chmod 700 /home/${username}/.ssh
+chmod 600 /home/${username}/.ssh/authorized_keys
+chown -R ${username}:${username} /home/${username}/.ssh
+SSH_KEY_COUNT=$(wc -l < /home/${username}/.ssh/authorized_keys)
+echo "✓ Added \${SSH_KEY_COUNT} SSH keys for ${username}" >> /var/log/startup.log
+
 # Make workspace accessible to all users
 chmod 755 /home/developer
 chmod -R a+rX /home/developer/workspace
