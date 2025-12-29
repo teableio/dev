@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect } from "react";
+import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { DevEnvironment, BaseImageInfo } from "@/lib/gcp";
 import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "@/lib/machine-configs";
@@ -35,7 +35,7 @@ interface EnvironmentPanelProps {
 }
 
 export function EnvironmentPanel({
-  username,
+  username: _username, // Reserved for future use
   initialEnvironment,
   initialEnvironments = [],
   baseImage,
@@ -488,6 +488,11 @@ export function EnvironmentPanel({
         )}
       </div>
     );
+  }
+
+  // At this point, environment is guaranteed to exist
+  if (!environment) {
+    return null; // TypeScript guard - should never reach here
   }
 
   const sshHost = `teable-dev-${environment.instanceId}`;

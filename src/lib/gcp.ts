@@ -3,7 +3,6 @@ import {
   ZoneOperationsClient,
   SnapshotsClient,
   GlobalOperationsClient,
-  DisksClient,
   ImagesClient,
 } from "@google-cloud/compute";
 import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "./machine-configs";
@@ -15,7 +14,6 @@ export type { MachineConfig };
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "teable-666";
 const ZONE = process.env.GCP_ZONE || "asia-southeast1-a"; // Singapore
-const REGION = ZONE.replace(/-[a-z]$/, ""); // asia-southeast1
 const IMAGE_FAMILY = process.env.GCP_IMAGE_FAMILY || "teable-dev";
 const DISK_SIZE_GB = 100;
 
@@ -38,7 +36,6 @@ const instancesClient = new InstancesClient(gcpOptions);
 const zoneOperationsClient = new ZoneOperationsClient(gcpOptions);
 const snapshotsClient = new SnapshotsClient(gcpOptions);
 const globalOperationsClient = new GlobalOperationsClient(gcpOptions);
-const disksClient = new DisksClient(gcpOptions);
 const imagesClient = new ImagesClient(gcpOptions);
 
 export interface BaseImageInfo {
@@ -82,20 +79,6 @@ function getSnapshotName(username: string, instanceId: string = DEFAULT_INSTANCE
   const sanitizedUser = sanitizeForGCP(username);
   const sanitizedId = sanitizeForGCP(instanceId);
   return `snap-${sanitizedUser}-${sanitizedId}`;
-}
-
-function parseInstanceName(name: string): { username: string; instanceId: string } | null {
-  // Parse instance name format: dev-{username}-{instanceId}
-  const match = name.match(/^dev-(.+?)-([^-]+)$/);
-  if (!match) {
-    // Try old format: dev-{username}
-    const oldMatch = name.match(/^dev-(.+)$/);
-    if (oldMatch) {
-      return { username: oldMatch[1], instanceId: DEFAULT_INSTANCE_ID };
-    }
-    return null;
-  }
-  return { username: match[1], instanceId: match[2] };
 }
 
 // Check if a snapshot exists for the user's instance
@@ -734,19 +717,6 @@ async function waitForOperation(operationName: string): Promise<void> {
 }
 
 function getStartupScript(username: string, isRestore: boolean = false, githubToken?: string): string {
-  // GitHub token credential setup - store user's OAuth token for git push
-  const tokenSetup = githubToken
-    ? `
-# Configure GitHub credentials using user's OAuth token
-sudo -u ${username} bash -c 'echo "https://${username}:${githubToken}@github.com" > /home/${username}/.git-credentials'
-chmod 600 /home/${username}/.git-credentials
-chown ${username}:${username} /home/${username}/.git-credentials
-echo "✓ GitHub credentials configured for ${username}" >> /var/log/startup.log
-`
-    : `
-echo "⚠ No GitHub token provided" >> /var/log/startup.log
-`;
-
   // GitHub token credential setup for developer user
   const devTokenSetup = githubToken
     ? `
