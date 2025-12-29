@@ -12,7 +12,7 @@ on:
 
 env:
   GCP_PROJECT_ID: teable-666
-  GCP_ZONE: asia-east2-a
+  GCP_ZONE: asia-southeast1-a
   IMAGE_FAMILY: teable-dev
 
 jobs:
