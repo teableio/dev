@@ -294,8 +294,8 @@ export function EnvironmentPanel({
 
   const selectedConfig = MACHINE_CONFIGS.find(c => c.machineType === selectedMachineType) || MACHINE_CONFIGS[0];
 
-  // Machine type selector component
-  const MachineTypeSelector = () => (
+  // Machine type selector - inline JSX to avoid re-mounting
+  const machineTypeSelectorJSX = (
     <div className="mb-6">
       <label className="block text-sm font-medium text-slate-400 mb-3">
         Machine Type
@@ -363,8 +363,8 @@ export function EnvironmentPanel({
     </div>
   );
 
-  // Create new instance form
-  const NewInstanceForm = () => (
+  // Create new instance form - inline JSX to avoid input focus issues
+  const newInstanceFormJSX = (
     <div className="rounded-2xl bg-slate-800/50 border border-slate-700 p-6 max-w-md mx-auto">
       <h3 className="text-lg font-semibold mb-4">Create New Environment</h3>
       
@@ -384,7 +384,7 @@ export function EnvironmentPanel({
         </p>
       </div>
 
-      <MachineTypeSelector />
+      {machineTypeSelectorJSX}
 
       <div className="flex gap-3">
         <button
@@ -431,11 +431,11 @@ export function EnvironmentPanel({
         )}
 
         {showNewInstanceForm ? (
-          <NewInstanceForm />
+          {newInstanceFormJSX}
         ) : (
           <>
             <div className="max-w-md mx-auto mb-8">
-              <MachineTypeSelector />
+              {machineTypeSelectorJSX}
             </div>
 
             <div className="flex flex-col items-center gap-4">
@@ -603,7 +603,7 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
         )}
 
         {showNewInstanceForm ? (
-          <NewInstanceForm />
+          {newInstanceFormJSX}
         ) : (
           <div className="flex items-center justify-center gap-4">
             <button
@@ -684,7 +684,7 @@ echo "✓ SSH configured for all Teable dev environments"`;
       {/* New Instance Form */}
       {showNewInstanceForm && (
         <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-6">
-          <NewInstanceForm />
+          {newInstanceFormJSX}
         </div>
       )}
 

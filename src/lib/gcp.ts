@@ -212,10 +212,10 @@ export async function createDevEnvironment(
   const instanceName = getInstanceName(username, instanceId);
   const snapshotName = getSnapshotName(username, instanceId);
 
-  // Check if instance already exists and is running
-  const existing = await getDevEnvironment(username);
+  // Check if this specific instance already exists and is running
+  const existing = await getDevEnvironment(username, instanceId);
   if (existing && existing.status !== "STOPPED") {
-    throw new Error("Environment already exists");
+    throw new Error(`Environment "${instanceId}" already exists`);
   }
 
   // Get user's SSH keys from GitHub
