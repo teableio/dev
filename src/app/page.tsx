@@ -109,7 +109,7 @@ export default async function Home() {
         <footer className="px-6 py-8 border-t border-white/5">
           <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-slate-500">
             <span>© 2024 Teable</span>
-            <span>Hong Kong Region • N2-Standard-8</span>
+            <span>Hong Kong Region • C3-Standard-8</span>
           </div>
         </footer>
       </div>

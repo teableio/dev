@@ -147,6 +147,20 @@ echo "=== Pre-pulling Docker images ==="
 docker pull postgres:15 || true
 docker pull redis:7 || true
 
+# Initialize database and start Docker containers
+echo ""
+echo "=== Initializing database (make switch-db-mode) ==="
+cd /home/developer/workspace
+
+# Run switch-db-mode with auto-select postgres (option 1)
+# This keeps sync with Makefile changes
+sudo -u developer bash -c 'cd /home/developer/workspace && echo "1" | make switch-db-mode'
+
+# Configure docker containers to auto-restart on boot
+docker update --restart=unless-stopped teable-postgres teable-cache || true
+
+echo "✓ Database initialized successfully"
+
 # Install Playwright dependencies (for testing)
 echo ""
 echo "=== Installing Playwright dependencies ==="
