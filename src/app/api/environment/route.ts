@@ -5,11 +5,13 @@ import {
   getDevEnvironment,
   deleteDevEnvironment,
   stopDevEnvironment,
+  listUserEnvironments,
   MACHINE_CONFIGS,
 } from "@/lib/gcp";
 
-// GET /api/environment - Get current user's environment
-export async function GET() {
+// GET /api/environment - Get current user's environments
+// Query params: ?instanceId=xxx (optional, if omitted returns all environments)
+export async function GET(request: NextRequest) {
   const session = await auth();
 
   if (!session?.username) {
@@ -17,8 +19,24 @@ export async function GET() {
   }
 
   try {
-    const environment = await getDevEnvironment(session.username);
-    return NextResponse.json({ environment, machineConfigs: MACHINE_CONFIGS });
+    const { searchParams } = new URL(request.url);
+    const instanceId = searchParams.get("instanceId");
+
+    if (instanceId) {
+      // Get specific environment
+      const environment = await getDevEnvironment(session.username, instanceId);
+      return NextResponse.json({ environment, machineConfigs: MACHINE_CONFIGS });
+    } else {
+      // List all environments for this user
+      const environments = await listUserEnvironments(session.username);
+      // For backward compatibility, also return the default environment separately
+      const defaultEnv = environments.find(e => e.instanceId === "default") || null;
+      return NextResponse.json({ 
+        environment: defaultEnv, // For backward compatibility
+        environments, // All environments
+        machineConfigs: MACHINE_CONFIGS 
+      });
+    }
   } catch (error) {
     console.error("Error getting environment:", error);
     return NextResponse.json(
@@ -29,6 +47,7 @@ export async function GET() {
 }
 
 // POST /api/environment - Create a new environment
+// Body: { machineType?: string, instanceId?: string }
 export async function POST(request: NextRequest) {
   const session = await auth();
 
@@ -37,13 +56,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Parse request body for optional machineType
+    // Parse request body for optional machineType and instanceId
     let machineType: string | undefined;
+    let instanceId: string | undefined;
     try {
       const body = await request.json();
       machineType = body.machineType;
+      instanceId = body.instanceId;
     } catch {
-      // No body or invalid JSON - use default
+      // No body or invalid JSON - use defaults
     }
 
     // Pass user's GitHub OAuth token for git push access
@@ -51,6 +72,7 @@ export async function POST(request: NextRequest) {
       username: session.username,
       githubToken: session.accessToken,
       machineType,
+      instanceId,
     });
     return NextResponse.json({ environment });
   } catch (error) {
@@ -62,7 +84,8 @@ export async function POST(request: NextRequest) {
 }
 
 // PATCH /api/environment - Stop the environment (create snapshot, delete instance)
-export async function PATCH() {
+// Body: { instanceId?: string }
+export async function PATCH(request: NextRequest) {
   const session = await auth();
 
   if (!session?.username) {
@@ -70,7 +93,15 @@ export async function PATCH() {
   }
 
   try {
-    await stopDevEnvironment(session.username);
+    let instanceId: string | undefined;
+    try {
+      const body = await request.json();
+      instanceId = body.instanceId;
+    } catch {
+      // No body - use default
+    }
+
+    await stopDevEnvironment(session.username, instanceId);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error stopping environment:", error);
@@ -81,7 +112,8 @@ export async function PATCH() {
 }
 
 // DELETE /api/environment - Delete the environment completely (instance + snapshot)
-export async function DELETE() {
+// Body: { instanceId?: string }
+export async function DELETE(request: NextRequest) {
   const session = await auth();
 
   if (!session?.username) {
@@ -89,7 +121,15 @@ export async function DELETE() {
   }
 
   try {
-    await deleteDevEnvironment(session.username);
+    let instanceId: string | undefined;
+    try {
+      const body = await request.json();
+      instanceId = body.instanceId;
+    } catch {
+      // No body - use default
+    }
+
+    await deleteDevEnvironment(session.username, instanceId);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting environment:", error);
@@ -99,4 +139,3 @@ export async function DELETE() {
     );
   }
 }
-

@@ -23,20 +23,27 @@ import {
   Package,
   ChevronDown,
   Zap,
+  Plus,
+  Monitor,
 } from "lucide-react";
 
 interface EnvironmentPanelProps {
   username: string;
   initialEnvironment: DevEnvironment | null;
+  initialEnvironments?: DevEnvironment[];
   baseImage: BaseImageInfo | null;
 }
 
 export function EnvironmentPanel({
   username,
   initialEnvironment,
+  initialEnvironments = [],
   baseImage,
 }: EnvironmentPanelProps) {
-  const [environment, setEnvironment] = useState(initialEnvironment);
+  const [environments, setEnvironments] = useState<DevEnvironment[]>(initialEnvironments);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(
+    initialEnvironment?.instanceId || (initialEnvironments.length > 0 ? initialEnvironments[0].instanceId : null)
+  );
   const [, startTransition] = useTransition();
   const [isCreating, setIsCreating] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -46,17 +53,36 @@ export function EnvironmentPanel({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedMachineType, setSelectedMachineType] = useState(DEFAULT_MACHINE_TYPE);
   const [showMachineSelector, setShowMachineSelector] = useState(false);
+  const [showNewInstanceForm, setShowNewInstanceForm] = useState(false);
+  const [newInstanceName, setNewInstanceName] = useState("");
   const router = useRouter();
+
+  // Get the currently selected environment
+  const environment = environments.find(e => e.instanceId === selectedInstanceId) || null;
+
+  // Refresh environments list
+  const refreshEnvironments = useCallback(async () => {
+    try {
+      const response = await fetch("/api/environment");
+      const data = await response.json();
+      if (data.environments) {
+        setEnvironments(data.environments);
+      }
+    } catch (err) {
+      console.error("Error refreshing environments:", err);
+    }
+  }, []);
 
   // Poll for environment status until target state is reached
   const pollUntilStatus = useCallback(async (
+    instanceId: string,
     targetStatus: "RUNNING" | "STOPPED" | null,
     maxAttempts = 60,
     intervalMs = 3000
   ): Promise<DevEnvironment | null> => {
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const response = await fetch("/api/environment");
+        const response = await fetch(`/api/environment?instanceId=${encodeURIComponent(instanceId)}`);
         const data = await response.json();
         const env = data.environment as DevEnvironment | null;
 
@@ -70,10 +96,12 @@ export function EnvironmentPanel({
         // Check if we've reached target state
         if (targetStatus === null && !env) {
           setStatusMessage(null);
+          await refreshEnvironments();
           return null;
         }
         if (targetStatus && env?.status === targetStatus) {
           setStatusMessage(null);
+          await refreshEnvironments();
           return env;
         }
 
@@ -85,10 +113,11 @@ export function EnvironmentPanel({
     }
 
     setStatusMessage(null);
+    await refreshEnvironments();
     throw new Error("Timeout waiting for environment status");
-  }, []);
+  }, [refreshEnvironments]);
 
-  const createEnvironment = async () => {
+  const createEnvironment = async (instanceId: string = "default") => {
     setIsCreating(true);
     setError(null);
     setStatusMessage("Creating environment...");
@@ -97,7 +126,10 @@ export function EnvironmentPanel({
       const response = await fetch("/api/environment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ machineType: selectedMachineType }),
+        body: JSON.stringify({ 
+          machineType: selectedMachineType,
+          instanceId,
+        }),
       });
 
       const data = await response.json();
@@ -108,9 +140,15 @@ export function EnvironmentPanel({
 
       // Initial environment created, now poll until RUNNING
       setStatusMessage("Waiting for environment to be ready...");
-      const env = await pollUntilStatus("RUNNING");
+      const env = await pollUntilStatus(instanceId, "RUNNING");
       
-      setEnvironment(env);
+      // Select the newly created instance
+      if (env) {
+        setSelectedInstanceId(env.instanceId);
+      }
+      setShowNewInstanceForm(false);
+      setNewInstanceName("");
+      
       startTransition(() => {
         router.refresh();
       });
@@ -123,6 +161,8 @@ export function EnvironmentPanel({
   };
 
   const stopEnvironment = async () => {
+    if (!environment) return;
+    
     if (
       !confirm(
         "Stop this environment? Your data will be saved and you can resume later. (No charges while stopped)"
@@ -138,6 +178,8 @@ export function EnvironmentPanel({
     try {
       const response = await fetch("/api/environment", {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceId: environment.instanceId }),
       });
 
       if (!response.ok) {
@@ -147,9 +189,8 @@ export function EnvironmentPanel({
 
       // Poll until STOPPED
       setStatusMessage("Saving environment state...");
-      const env = await pollUntilStatus("STOPPED");
+      await pollUntilStatus(environment.instanceId, "STOPPED");
       
-      setEnvironment(env);
       startTransition(() => {
         router.refresh();
       });
@@ -162,6 +203,8 @@ export function EnvironmentPanel({
   };
 
   const deleteEnvironment = async () => {
+    if (!environment) return;
+    
     const hasSnapshot = environment?.hasSnapshot;
     const message = hasSnapshot
       ? "Are you sure you want to RESET this environment? This will delete your saved data and start fresh from the base image."
@@ -178,6 +221,8 @@ export function EnvironmentPanel({
     try {
       const response = await fetch("/api/environment", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceId: environment.instanceId }),
       });
 
       if (!response.ok) {
@@ -187,9 +232,16 @@ export function EnvironmentPanel({
 
       // Poll until environment is gone (null)
       setStatusMessage("Cleaning up resources...");
-      await pollUntilStatus(null);
+      await pollUntilStatus(environment.instanceId, null);
 
-      setEnvironment(null);
+      // Select another instance if available
+      const remaining = environments.filter(e => e.instanceId !== environment.instanceId);
+      if (remaining.length > 0) {
+        setSelectedInstanceId(remaining[0].instanceId);
+      } else {
+        setSelectedInstanceId(null);
+      }
+
       startTransition(() => {
         router.refresh();
       });
@@ -242,7 +294,125 @@ export function EnvironmentPanel({
 
   const selectedConfig = MACHINE_CONFIGS.find(c => c.machineType === selectedMachineType) || MACHINE_CONFIGS[0];
 
-  if (!environment) {
+  // Machine type selector component
+  const MachineTypeSelector = () => (
+    <div className="mb-6">
+      <label className="block text-sm font-medium text-slate-400 mb-3">
+        Machine Type
+      </label>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setShowMachineSelector(!showMachineSelector)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/50 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center">
+              <Zap className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="font-medium text-white">{selectedConfig.displayName}</div>
+              <div className="text-xs text-slate-400">
+                {selectedConfig.vCPU} vCPU • {selectedConfig.memoryGB} GB RAM
+              </div>
+            </div>
+          </div>
+          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showMachineSelector ? 'rotate-180' : ''}`} />
+        </button>
+
+        {showMachineSelector && (
+          <div className="absolute top-full left-0 right-0 mt-2 py-2 rounded-xl bg-slate-800 border border-slate-700 shadow-xl z-10">
+            {MACHINE_CONFIGS.map((config) => (
+              <button
+                key={config.machineType}
+                onClick={() => {
+                  setSelectedMachineType(config.machineType);
+                  setShowMachineSelector(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-700/50 transition-colors text-left ${
+                  config.machineType === selectedMachineType ? 'bg-emerald-500/10' : ''
+                }`}
+              >
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  config.machineType === selectedMachineType 
+                    ? 'bg-gradient-to-br from-emerald-500/30 to-cyan-500/30' 
+                    : 'bg-slate-700'
+                }`}>
+                  <Zap className={`w-5 h-5 ${
+                    config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-slate-400'
+                  }`} />
+                </div>
+                <div className="flex-1">
+                  <div className={`font-medium ${
+                    config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-white'
+                  }`}>
+                    {config.displayName}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {config.vCPU} vCPU • {config.memoryGB} GB RAM • {config.diskType}
+                  </div>
+                </div>
+                {config.machineType === selectedMachineType && (
+                  <Check className="w-5 h-5 text-emerald-400" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Create new instance form
+  const NewInstanceForm = () => (
+    <div className="rounded-2xl bg-slate-800/50 border border-slate-700 p-6 max-w-md mx-auto">
+      <h3 className="text-lg font-semibold mb-4">Create New Environment</h3>
+      
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-slate-400 mb-2">
+          Instance Name
+        </label>
+        <input
+          type="text"
+          value={newInstanceName}
+          onChange={(e) => setNewInstanceName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+          placeholder="e.g., experiment, feature-x"
+          className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:outline-none text-white placeholder-slate-500"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Lowercase letters, numbers, and hyphens only
+        </p>
+      </div>
+
+      <MachineTypeSelector />
+
+      <div className="flex gap-3">
+        <button
+          onClick={() => {
+            setShowNewInstanceForm(false);
+            setNewInstanceName("");
+          }}
+          className="flex-1 px-4 py-3 rounded-xl border border-slate-600 text-slate-400 hover:bg-slate-700/50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => createEnvironment(newInstanceName || "default")}
+          disabled={isCreating}
+          className="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-medium hover:from-emerald-400 hover:to-cyan-400 transition-colors disabled:opacity-50"
+        >
+          {isCreating ? (
+            <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+          ) : (
+            "Create"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
+  // No environments at all
+  if (environments.length === 0 && !environment) {
     return (
       <div className="rounded-3xl bg-white/[0.03] border border-white/[0.05] p-12 text-center">
         <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center mx-auto mb-6">
@@ -250,103 +420,43 @@ export function EnvironmentPanel({
         </div>
 
         <h2 className="text-2xl font-semibold mb-3">No Environment Running</h2>
-        <p className="text-slate-400 mb-6 max-w-md mx-auto">
+        <p className="text-slate-400 mb-8 max-w-md mx-auto">
           Create a powerful cloud development environment with the latest Teable codebase pre-installed.
         </p>
 
-        {/* Machine Type Selector */}
-        <div className="mb-8 max-w-md mx-auto">
-          <label className="block text-sm font-medium text-slate-400 mb-3">
-            Select Machine Type
-          </label>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowMachineSelector(!showMachineSelector)}
-              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/50 transition-colors text-left"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <div className="font-medium text-white">{selectedConfig.displayName}</div>
-                  <div className="text-xs text-slate-400">
-                    {selectedConfig.vCPU} vCPU • {selectedConfig.memoryGB} GB RAM
-                  </div>
-                </div>
-              </div>
-              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showMachineSelector ? 'rotate-180' : ''}`} />
-            </button>
-
-            {showMachineSelector && (
-              <div className="absolute top-full left-0 right-0 mt-2 py-2 rounded-xl bg-slate-800 border border-slate-700 shadow-xl z-10">
-                {MACHINE_CONFIGS.map((config) => (
-                  <button
-                    key={config.machineType}
-                    onClick={() => {
-                      setSelectedMachineType(config.machineType);
-                      setShowMachineSelector(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-700/50 transition-colors text-left ${
-                      config.machineType === selectedMachineType ? 'bg-emerald-500/10' : ''
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      config.machineType === selectedMachineType 
-                        ? 'bg-gradient-to-br from-emerald-500/30 to-cyan-500/30' 
-                        : 'bg-slate-700'
-                    }`}>
-                      <Zap className={`w-5 h-5 ${
-                        config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-slate-400'
-                      }`} />
-                    </div>
-                    <div className="flex-1">
-                      <div className={`font-medium ${
-                        config.machineType === selectedMachineType ? 'text-emerald-400' : 'text-white'
-                      }`}>
-                        {config.displayName}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {config.vCPU} vCPU • {config.memoryGB} GB RAM • {config.diskType}
-                      </div>
-                    </div>
-                    {config.machineType === selectedMachineType && (
-                      <Check className="w-5 h-5 text-emerald-400" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            C4 offers best performance. Falls back to C3/N2 if quota unavailable.
-          </p>
-        </div>
-
         {error && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm max-w-md mx-auto">
             {error}
           </div>
         )}
 
-        <button
-          onClick={createEnvironment}
-          disabled={isCreating}
-          className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-        >
-          {isCreating ? (
-            <>
-              <Loader2 className="w-6 h-6 animate-spin" />
-              Creating Environment...
-            </>
-          ) : (
-            <>
-              <Play className="w-6 h-6" />
-              Create Environment
-            </>
-          )}
-        </button>
+        {showNewInstanceForm ? (
+          <NewInstanceForm />
+        ) : (
+          <>
+            <div className="max-w-md mx-auto mb-8">
+              <MachineTypeSelector />
+            </div>
+
+            <button
+              onClick={() => createEnvironment("default")}
+              disabled={isCreating}
+              className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  Creating Environment...
+                </>
+              ) : (
+                <>
+                  <Play className="w-6 h-6" />
+                  Create Environment
+                </>
+              )}
+            </button>
+          </>
+        )}
 
         <p className="mt-6 text-sm text-slate-500">
           {statusMessage || "Estimated startup time: ~60 seconds"}
@@ -370,7 +480,7 @@ export function EnvironmentPanel({
     );
   }
 
-  const sshHost = "teable-dev";
+  const sshHost = `teable-dev-${environment.instanceId}`;
   // Login as 'developer' user - this avoids all permission issues
   // The user's GitHub SSH key is added to developer's authorized_keys
   const sshTarget = `developer@${environment.externalIp}`;
@@ -408,15 +518,56 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
   const isRunning = environment.status === "RUNNING";
   const isStopped = environment.status === "STOPPED";
 
+  // Instance selector component (shown when there are multiple instances)
+  const InstanceSelector = () => {
+    if (environments.length <= 1 && !showNewInstanceForm) return null;
+    
+    return (
+      <div className="mb-6 flex items-center gap-4 justify-center flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {environments.map((env) => (
+            <button
+              key={env.instanceId}
+              onClick={() => setSelectedInstanceId(env.instanceId)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
+                env.instanceId === selectedInstanceId
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
+                  : 'bg-slate-800/50 text-slate-400 border border-slate-700 hover:border-slate-600'
+              }`}
+            >
+              <Monitor className="w-4 h-4" />
+              {env.instanceId}
+              <span className={`w-2 h-2 rounded-full ${
+                env.status === 'RUNNING' ? 'bg-emerald-400' : 'bg-amber-400'
+              }`} />
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowNewInstanceForm(true)}
+          className="px-4 py-2 rounded-xl text-sm font-medium bg-slate-800/50 text-slate-400 border border-dashed border-slate-600 hover:border-emerald-500/50 hover:text-emerald-400 transition-colors flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          New Instance
+        </button>
+      </div>
+    );
+  };
+
   // If stopped, show resume UI
   if (isStopped) {
     return (
       <div className="rounded-3xl bg-white/[0.03] border border-white/[0.05] p-12 text-center">
+        <InstanceSelector />
+        
         <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center mx-auto mb-6">
           <Server className="w-10 h-10 text-amber-400" />
         </div>
 
-        <h2 className="text-2xl font-semibold mb-3">Environment Stopped</h2>
+        <h2 className="text-2xl font-semibold mb-3">
+          Environment Stopped
+          {environments.length > 1 && <span className="text-slate-500 text-lg ml-2">({environment.instanceId})</span>}
+        </h2>
         <p className="text-slate-400 mb-8 max-w-md mx-auto">
           Your environment is saved. Resume to continue where you left off, or reset to start fresh.
         </p>
@@ -427,43 +578,47 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-4">
-          <button
-            onClick={createEnvironment}
-            disabled={isCreating || isDeleting}
-            className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-          >
-            {isCreating ? (
-              <>
-                <Loader2 className="w-6 h-6 animate-spin" />
-                Resuming...
-              </>
-            ) : (
-              <>
-                <Play className="w-6 h-6" />
-                Resume Environment
-              </>
-            )}
-          </button>
+        {showNewInstanceForm ? (
+          <NewInstanceForm />
+        ) : (
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={() => createEnvironment(environment.instanceId)}
+              disabled={isCreating || isDeleting}
+              className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  Resuming...
+                </>
+              ) : (
+                <>
+                  <Play className="w-6 h-6" />
+                  Resume Environment
+                </>
+              )}
+            </button>
 
-          <button
-            onClick={deleteEnvironment}
-            disabled={isCreating || isDeleting}
-            className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-red-500/10 text-red-400 font-semibold hover:bg-red-500/20 transition-all disabled:opacity-50"
-          >
-            {isDeleting ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Resetting...
-              </>
-            ) : (
-              <>
-                <RotateCcw className="w-5 h-5" />
-                Reset
-              </>
-            )}
-          </button>
-        </div>
+            <button
+              onClick={deleteEnvironment}
+              disabled={isCreating || isDeleting}
+              className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-red-500/10 text-red-400 font-semibold hover:bg-red-500/20 transition-all disabled:opacity-50"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Resetting...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-5 h-5" />
+                  Reset
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         <p className="mt-6 text-sm text-slate-500">
           {statusMessage || "Resume restores your saved state • Reset starts fresh from base image"}
@@ -487,8 +642,28 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
     );
   }
 
+  // One-time SSH setup command (works for all teable-dev instances)
+  const sshOneTimeSetup = `# Run this once to enable seamless connections for all Teable dev environments
+grep -q "Host teable-dev-\\*" ~/.ssh/config 2>/dev/null || cat >> ~/.ssh/config << 'EOF'
+
+Host teable-dev-*
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+EOF
+echo "✓ SSH configured for all Teable dev environments"`;
+
   return (
     <div className="space-y-6">
+      {/* Instance Selector - show when multiple instances */}
+      {environments.length > 1 && <InstanceSelector />}
+      
+      {/* New Instance Form Modal */}
+      {showNewInstanceForm && (
+        <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-6">
+          <NewInstanceForm />
+        </div>
+      )}
+
       {/* Status Card */}
       <div className="rounded-3xl bg-white/[0.03] border border-white/[0.05] overflow-hidden">
         {/* Header */}
@@ -662,11 +837,47 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
             </div>
           </div>
 
+          {/* First-time SSH Setup - Prominent */}
+          <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-500/10 to-emerald-500/10 border border-cyan-500/30">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Zap className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-medium text-cyan-400 mb-1">First Time Setup (Run Once)</h4>
+                <p className="text-sm text-slate-400 mb-3">
+                  Run this command once to enable seamless SSH connections for all Teable dev environments:
+                </p>
+                <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-700/50">
+                  <pre className="text-xs text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap">
+                    {sshOneTimeSetup}
+                  </pre>
+                </div>
+                <button
+                  onClick={() => copyToClipboard(sshOneTimeSetup, "onetime")}
+                  className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors text-sm font-medium"
+                >
+                  {copied === "onetime" ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Copy Setup Command
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Troubleshooting - collapsed by default */}
           <details className="group">
             <summary className="text-sm text-slate-500 cursor-pointer hover:text-slate-400 transition-colors flex items-center gap-2">
               <AlertCircle className="w-4 h-4" />
-              Connection not working? Click here for troubleshooting
+              Still having issues? Click for advanced troubleshooting
             </summary>
             <div className="mt-4 space-y-4">
               <p className="text-sm text-slate-400">

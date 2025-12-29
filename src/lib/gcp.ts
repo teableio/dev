@@ -4,8 +4,6 @@ import {
   SnapshotsClient,
   GlobalOperationsClient,
   DisksClient,
-  AddressesClient,
-  RegionOperationsClient,
   ImagesClient,
 } from "@google-cloud/compute";
 import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "./machine-configs";
@@ -41,8 +39,6 @@ const zoneOperationsClient = new ZoneOperationsClient(gcpOptions);
 const snapshotsClient = new SnapshotsClient(gcpOptions);
 const globalOperationsClient = new GlobalOperationsClient(gcpOptions);
 const disksClient = new DisksClient(gcpOptions);
-const addressesClient = new AddressesClient(gcpOptions);
-const regionOperationsClient = new RegionOperationsClient(gcpOptions);
 const imagesClient = new ImagesClient(gcpOptions);
 
 export interface BaseImageInfo {
@@ -57,6 +53,7 @@ export interface BaseImageInfo {
 
 export interface DevEnvironment {
   name: string;
+  instanceId: string; // User-defined instance identifier (e.g., "default", "experiment")
   status: string; // RUNNING, STOPPED (has snapshot but no instance), STAGING, etc.
   externalIp: string | null;
   internalIp: string | null;
@@ -68,126 +65,42 @@ export interface DevEnvironment {
   hasSnapshot: boolean;
 }
 
-function getInstanceName(username: string): string {
-  // Sanitize username for GCP instance name requirements
-  const sanitized = username.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  return `dev-${sanitized}`;
+// Default instance ID for backward compatibility
+const DEFAULT_INSTANCE_ID = "default";
+
+function sanitizeForGCP(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 }
 
-function getSnapshotName(username: string): string {
-  const sanitized = username.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  return `dev-snapshot-${sanitized}`;
+function getInstanceName(username: string, instanceId: string = DEFAULT_INSTANCE_ID): string {
+  const sanitizedUser = sanitizeForGCP(username);
+  const sanitizedId = sanitizeForGCP(instanceId);
+  return `dev-${sanitizedUser}-${sanitizedId}`;
 }
 
-function getAddressName(username: string): string {
-  const sanitized = username.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  return `dev-ip-${sanitized}`;
+function getSnapshotName(username: string, instanceId: string = DEFAULT_INSTANCE_ID): string {
+  const sanitizedUser = sanitizeForGCP(username);
+  const sanitizedId = sanitizeForGCP(instanceId);
+  return `snap-${sanitizedUser}-${sanitizedId}`;
 }
 
-// Get or create a static IP address for the user
-async function getOrCreateStaticIP(username: string): Promise<string> {
-  const addressName = getAddressName(username);
-  
-  // Try to get existing address
-  try {
-    const [address] = await addressesClient.get({
-      project: PROJECT_ID,
-      region: REGION,
-      address: addressName,
-    });
-    console.log(`Using existing static IP: ${address.address}`);
-    return address.address!;
-  } catch (error) {
-    const err = error as { code?: number; status?: number };
-    if (err.code !== 5 && err.code !== 404 && err.status !== 404) {
-      throw error;
+function parseInstanceName(name: string): { username: string; instanceId: string } | null {
+  // Parse instance name format: dev-{username}-{instanceId}
+  const match = name.match(/^dev-(.+?)-([^-]+)$/);
+  if (!match) {
+    // Try old format: dev-{username}
+    const oldMatch = name.match(/^dev-(.+)$/);
+    if (oldMatch) {
+      return { username: oldMatch[1], instanceId: DEFAULT_INSTANCE_ID };
     }
+    return null;
   }
-  
-  // Create new static IP
-  console.log(`Creating new static IP for ${username}`);
-  const [operation] = await addressesClient.insert({
-    project: PROJECT_ID,
-    region: REGION,
-    addressResource: {
-      name: addressName,
-      description: `Static IP for ${username}'s dev environment`,
-      networkTier: "PREMIUM",
-    },
-  });
-  
-  // Wait for operation
-  await waitForRegionOperation(operation.name!);
-  
-  // Get the created address
-  const [newAddress] = await addressesClient.get({
-    project: PROJECT_ID,
-    region: REGION,
-    address: addressName,
-  });
-  
-  console.log(`Created static IP: ${newAddress.address}`);
-  return newAddress.address!;
+  return { username: match[1], instanceId: match[2] };
 }
 
-// Delete static IP address
-async function deleteStaticIP(username: string): Promise<void> {
-  const addressName = getAddressName(username);
-  
-  try {
-    const [operation] = await addressesClient.delete({
-      project: PROJECT_ID,
-      region: REGION,
-      address: addressName,
-    });
-    await waitForRegionOperation(operation.name!);
-    console.log(`Deleted static IP: ${addressName}`);
-  } catch (error) {
-    const err = error as { code?: number; status?: number };
-    if (err.code !== 5 && err.code !== 404 && err.status !== 404) {
-      throw error;
-    }
-    // IP doesn't exist, that's fine
-  }
-}
-
-// Wait for region operation (for addresses)
-async function waitForRegionOperation(operationName: string): Promise<void> {
-  const maxRetries = 60; // 5 minutes max
-  
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const [operation] = await regionOperationsClient.get({
-        project: PROJECT_ID,
-        region: REGION,
-        operation: operationName,
-      });
-
-      if (operation.status === "DONE") {
-        if (operation.error) {
-          throw new Error(
-            `Operation failed: ${JSON.stringify(operation.error.errors)}`
-          );
-        }
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    } catch (error) {
-      const err = error as { code?: number; status?: number };
-      if (err.code === 404 || err.status === 404 || err.code === 5) {
-        return; // Operation completed and was cleaned up
-      }
-      throw error;
-    }
-  }
-
-  throw new Error("Region operation timed out");
-}
-
-// Check if a snapshot exists for the user
-async function snapshotExists(username: string): Promise<boolean> {
-  const snapshotName = getSnapshotName(username);
+// Check if a snapshot exists for the user's instance
+async function snapshotExists(username: string, instanceId: string = DEFAULT_INSTANCE_ID): Promise<boolean> {
+  const snapshotName = getSnapshotName(username, instanceId);
   try {
     await snapshotsClient.get({
       project: PROJECT_ID,
@@ -298,6 +211,7 @@ export interface CreateEnvironmentOptions {
   username: string;
   githubToken?: string;
   machineType?: string; // If specified, use only this machine type (no fallback)
+  instanceId?: string; // Instance identifier (default: "default")
 }
 
 export async function createDevEnvironment(
@@ -309,11 +223,11 @@ export async function createDevEnvironment(
     ? { username: usernameOrOptions, githubToken }
     : usernameOrOptions;
   
-  const { username, machineType: requestedMachineType } = options;
+  const { username, machineType: requestedMachineType, instanceId = DEFAULT_INSTANCE_ID } = options;
   const token = typeof usernameOrOptions === 'string' ? githubToken : options.githubToken;
   
-  const instanceName = getInstanceName(username);
-  const snapshotName = getSnapshotName(username);
+  const instanceName = getInstanceName(username, instanceId);
+  const snapshotName = getSnapshotName(username, instanceId);
 
   // Check if instance already exists and is running
   const existing = await getDevEnvironment(username);
@@ -331,9 +245,6 @@ export async function createDevEnvironment(
 
   const now = new Date().toISOString();
   const hasSnap = await snapshotExists(username);
-  
-  // Get or create static IP for this user
-  const staticIP = await getOrCreateStaticIP(username);
 
   // Determine which machine configs to try
   // If user specified a machine type, use only that one
@@ -391,7 +302,8 @@ export async function createDevEnvironment(
                 {
                   name: "External NAT",
                   type: "ONE_TO_ONE_NAT",
-                  natIP: staticIP, // Use reserved static IP
+                  // Let GCP auto-assign ephemeral IP (no static IP needed)
+                  // SSH config uses StrictHostKeyChecking=no, so IP changes are OK
                 },
               ],
             },
@@ -413,6 +325,10 @@ export async function createDevEnvironment(
               {
                 key: "username",
                 value: username,
+              },
+              {
+                key: "instance-id",
+                value: instanceId,
               },
               {
                 key: "startup-script",
@@ -470,10 +386,11 @@ export async function createDevEnvironment(
 }
 
 export async function getDevEnvironment(
-  username: string
+  username: string,
+  instanceId: string = DEFAULT_INSTANCE_ID
 ): Promise<DevEnvironment | null> {
-  const instanceName = getInstanceName(username);
-  const hasSnap = await snapshotExists(username);
+  const instanceName = getInstanceName(username, instanceId);
+  const hasSnap = await snapshotExists(username, instanceId);
 
   try {
     const [instance] = await instancesClient.get({
@@ -488,6 +405,7 @@ export async function getDevEnvironment(
 
     return {
       name: instance.name!,
+      instanceId: getMetadata("instance-id") || DEFAULT_INSTANCE_ID,
       status: instance.status!,
       externalIp:
         instance.networkInterfaces?.[0]?.accessConfigs?.[0]?.natIP || null,
@@ -505,24 +423,12 @@ export async function getDevEnvironment(
     if (err.code === 5 || err.code === 404 || err.status === 404) {
       // No instance, but check if there's a snapshot (stopped state)
       if (hasSnap) {
-        // Get static IP if exists (so user can see their reserved IP)
-        let staticIP: string | null = null;
-        try {
-          const [address] = await addressesClient.get({
-            project: PROJECT_ID,
-            region: REGION,
-            address: getAddressName(username),
-          });
-          staticIP = address.address || null;
-        } catch {
-          // No static IP
-        }
-        
         // Return a "STOPPED" environment - has snapshot but no running instance
         return {
           name: instanceName,
+          instanceId: DEFAULT_INSTANCE_ID,
           status: "STOPPED",
-          externalIp: staticIP,
+          externalIp: null, // No IP when stopped (ephemeral IP will be assigned on start)
           internalIp: null,
           createdAt: "",
           lastActiveAt: "",
@@ -539,9 +445,9 @@ export async function getDevEnvironment(
 }
 
 // Stop environment: create snapshot and delete instance (saves money, preserves data)
-export async function stopDevEnvironment(username: string): Promise<void> {
-  const instanceName = getInstanceName(username);
-  const snapshotName = getSnapshotName(username);
+export async function stopDevEnvironment(username: string, instanceId: string = DEFAULT_INSTANCE_ID): Promise<void> {
+  const instanceName = getInstanceName(username, instanceId);
+  const snapshotName = getSnapshotName(username, instanceId);
   
   // First, check if instance exists
   try {
@@ -600,9 +506,9 @@ export async function stopDevEnvironment(username: string): Promise<void> {
 }
 
 // Delete environment completely: delete instance AND snapshot
-export async function deleteDevEnvironment(username: string): Promise<void> {
-  const instanceName = getInstanceName(username);
-  const snapshotName = getSnapshotName(username);
+export async function deleteDevEnvironment(username: string, instanceId: string = DEFAULT_INSTANCE_ID): Promise<void> {
+  const instanceName = getInstanceName(username, instanceId);
+  const snapshotName = getSnapshotName(username, instanceId);
 
   // Delete instance if exists
   try {
@@ -637,8 +543,8 @@ export async function deleteDevEnvironment(username: string): Promise<void> {
   }
 }
 
-export async function updateLastActiveTime(username: string): Promise<void> {
-  const instanceName = getInstanceName(username);
+export async function updateLastActiveTime(username: string, instanceId: string = DEFAULT_INSTANCE_ID): Promise<void> {
+  const instanceName = getInstanceName(username, instanceId);
   const now = new Date().toISOString();
 
   try {
@@ -687,10 +593,12 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
         metadata.find((m) => m.key === key)?.value || "";
       
       const username = getMetadata("username");
-      const hasSnap = username ? await snapshotExists(username) : false;
+      const instanceId = getMetadata("instance-id") || DEFAULT_INSTANCE_ID;
+      const hasSnap = username ? await snapshotExists(username, instanceId) : false;
 
       environments.push({
         name: instance.name!,
+        instanceId: instanceId,
         status: instance.status!,
         externalIp:
           instance.networkInterfaces?.[0]?.accessConfigs?.[0]?.natIP || null,
@@ -705,6 +613,85 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
     }
   } catch (error) {
     console.error("Error listing environments:", error);
+  }
+
+  return environments;
+}
+
+// List all environments for a specific user (including stopped ones with snapshots)
+export async function listUserEnvironments(username: string): Promise<DevEnvironment[]> {
+  const environments: DevEnvironment[] = [];
+  const sanitizedUser = sanitizeForGCP(username);
+  
+  // First, get all running instances for this user
+  try {
+    const [instances] = await instancesClient.list({
+      project: PROJECT_ID,
+      zone: ZONE,
+      filter: `labels.purpose="dev-env" AND name:dev-${sanitizedUser}-*`,
+    });
+
+    for (const instance of instances) {
+      const metadata = instance.metadata?.items || [];
+      const getMetadata = (key: string) =>
+        metadata.find((m) => m.key === key)?.value || "";
+      
+      const instanceId = getMetadata("instance-id") || DEFAULT_INSTANCE_ID;
+      const hasSnap = await snapshotExists(username, instanceId);
+
+      environments.push({
+        name: instance.name!,
+        instanceId: instanceId,
+        status: instance.status!,
+        externalIp:
+          instance.networkInterfaces?.[0]?.accessConfigs?.[0]?.natIP || null,
+        internalIp: instance.networkInterfaces?.[0]?.networkIP || null,
+        createdAt: getMetadata("created-at"),
+        lastActiveAt: getMetadata("last-active-at"),
+        username: username,
+        machineType: DEFAULT_MACHINE_TYPE,
+        zone: ZONE,
+        hasSnapshot: hasSnap,
+      });
+    }
+  } catch (error) {
+    console.error("Error listing user instances:", error);
+  }
+
+  // Also check for snapshots (stopped instances)
+  try {
+    const [snapshots] = await snapshotsClient.list({
+      project: PROJECT_ID,
+      filter: `name:snap-${sanitizedUser}-*`,
+    });
+
+    for (const snapshot of snapshots) {
+      // Parse instance ID from snapshot name: snap-{username}-{instanceId}
+      const match = snapshot.name?.match(new RegExp(`^snap-${sanitizedUser}-(.+)$`));
+      if (!match) continue;
+      const instanceId = match[1];
+
+      // Check if there's already a running instance for this
+      const alreadyListed = environments.find(e => e.instanceId === instanceId);
+      if (alreadyListed) continue;
+
+      // This is a stopped instance (has snapshot but no running instance)
+      environments.push({
+        name: getInstanceName(username, instanceId),
+        instanceId: instanceId,
+        status: "STOPPED",
+        externalIp: null,
+        internalIp: null,
+        createdAt: snapshot.creationTimestamp || "",
+        lastActiveAt: snapshot.creationTimestamp || "",
+        username: username,
+        machineType: DEFAULT_MACHINE_TYPE,
+        zone: ZONE,
+        hasSnapshot: true,
+      });
+    }
+  } catch (error) {
+    console.error("Error listing user snapshots:", error);
   }
 
   return environments;

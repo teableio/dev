@@ -1,6 +1,6 @@
 import { auth, signOut } from "@/auth";
 import { redirect } from "next/navigation";
-import { getDevEnvironment, getBaseImageInfo } from "@/lib/gcp";
+import { getDevEnvironment, getBaseImageInfo, listUserEnvironments } from "@/lib/gcp";
 import { EnvironmentPanel } from "@/components/environment-panel";
 import { Terminal, LogOut, User } from "lucide-react";
 
@@ -11,8 +11,9 @@ export default async function Dashboard() {
     redirect("/");
   }
 
-  const [environment, baseImage] = await Promise.all([
+  const [environment, environments, baseImage] = await Promise.all([
     getDevEnvironment(session.username),
+    listUserEnvironments(session.username),
     getBaseImageInfo(),
   ]);
 
@@ -70,6 +71,7 @@ export default async function Dashboard() {
           <EnvironmentPanel
             username={session.username}
             initialEnvironment={environment}
+            initialEnvironments={environments}
             baseImage={baseImage}
           />
         </main>
