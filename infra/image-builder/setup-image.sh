@@ -133,6 +133,14 @@ echo "COMMIT_MSG=$COMMIT_MSG" >> /home/developer/.image-info
 echo "COMMIT_AUTHOR=$COMMIT_AUTHOR" >> /home/developer/.image-info
 echo "BUILD_DATE=$(date -Iseconds)" >> /home/developer/.image-info
 
+# Also output to console/serial for CI to read
+echo ""
+echo "=== COMMIT INFO ==="
+echo "COMMIT_SHA=$COMMIT_SHA"
+echo "COMMIT_MSG=$COMMIT_MSG"
+echo "COMMIT_AUTHOR=$COMMIT_AUTHOR"
+echo "==================="
+
 # Pre-pull common Docker images
 echo ""
 echo "=== Pre-pulling Docker images ==="

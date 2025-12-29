@@ -68,52 +68,70 @@ echo ""
 echo "=== Waiting for instance to start ==="
 sleep 30
 
-# Wait for setup to complete (check for marker file)
+# Wait for setup to complete using serial port output (more reliable than SSH in CI)
 echo ""
 echo "=== Waiting for setup to complete (this may take 10-15 minutes) ==="
-MAX_WAIT=1200  # 20 minutes
+MAX_WAIT=1500  # 25 minutes
 WAITED=0
-SSH_READY=false
 
-# SSH options for non-interactive connections
-SSH_OPTS="--ssh-flag=-o --ssh-flag=StrictHostKeyChecking=no --ssh-flag=-o --ssh-flag=UserKnownHostsFile=/dev/null --ssh-flag=-o --ssh-flag=LogLevel=ERROR"
-
-# First wait for SSH to be ready (try both direct and IAP tunnel)
-echo "Waiting for SSH to be ready..."
-while [[ $WAITED -lt 300 ]]; do
-  # Try direct SSH first, then IAP tunnel
-  if gcloud compute ssh "$INSTANCE_NAME" \
+# Function to check serial port output for completion marker
+check_serial_output() {
+  gcloud compute instances get-serial-port-output "$INSTANCE_NAME" \
     --project="$PROJECT_ID" \
     --zone="$ZONE" \
-    --command="echo 'SSH OK'" \
-    $SSH_OPTS \
-    --quiet 2>/dev/null || \
-     gcloud compute ssh "$INSTANCE_NAME" \
-    --project="$PROJECT_ID" \
-    --zone="$ZONE" \
-    --tunnel-through-iap \
-    --command="echo 'SSH OK'" \
-    $SSH_OPTS \
-    --quiet 2>/dev/null; then
-    echo "SSH is ready!"
-    SSH_READY=true
+    2>/dev/null
+}
+
+# Function to get last N lines from serial output
+get_serial_tail() {
+  check_serial_output | grep -v "^$" | tail -${1:-10}
+}
+
+# Wait for setup to complete by checking serial port output
+while [[ $WAITED -lt $MAX_WAIT ]]; do
+  SERIAL_OUTPUT=$(check_serial_output 2>/dev/null || echo "")
+  
+  # Check if setup is complete
+  if echo "$SERIAL_OUTPUT" | grep -q "=== Setup Complete ==="; then
+    echo ""
+    echo "✅ Setup complete!"
     break
   fi
-  echo "  Waiting for SSH... ($WAITED seconds)"
-  sleep 15
-  WAITED=$((WAITED + 15))
+  
+  # Check for errors
+  if echo "$SERIAL_OUTPUT" | grep -q "ERROR\|FATAL\|failed to"; then
+    echo ""
+    echo "⚠️  Warning: Possible error detected, continuing to wait..."
+  fi
+  
+  # Show progress every 60 seconds
+  if [[ $((WAITED % 60)) -eq 0 ]] && [[ $WAITED -gt 0 ]]; then
+    echo ""
+    echo "[$WAITED seconds] Latest progress:"
+    # Show last few meaningful lines from serial output
+    echo "$SERIAL_OUTPUT" | grep -E "^(===|Done|Installing|Cloning|Setting|Creating|npm|pnpm)" | tail -3 || echo "(waiting for output...)"
+  else
+    echo -n "."
+  fi
+  
+  sleep 30
+  WAITED=$((WAITED + 30))
 done
 
-if [[ "$SSH_READY" != "true" ]]; then
-  echo "ERROR: SSH not ready after 5 minutes!"
-  echo "Checking instance status..."
-  gcloud compute instances describe "$INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --format="yaml(status,networkInterfaces[0].accessConfigs[0].natIP)"
+if [[ $WAITED -ge $MAX_WAIT ]]; then
   echo ""
-  echo "Checking serial port output for errors..."
-  gcloud compute instances get-serial-port-output "$INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" 2>/dev/null | tail -50
+  echo "❌ ERROR: Setup timed out after $MAX_WAIT seconds!"
+  echo ""
+  echo "Last 50 lines from serial output:"
+  get_serial_tail 50
+  echo ""
+  echo "Cleaning up..."
   gcloud compute instances delete "$INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --quiet
   exit 1
 fi
+
+# SSH options for post-setup commands
+SSH_OPTS="--ssh-flag=-o --ssh-flag=StrictHostKeyChecking=no --ssh-flag=-o --ssh-flag=UserKnownHostsFile=/dev/null --ssh-flag=-o --ssh-flag=LogLevel=ERROR"
 
 # Helper function to run SSH command (tries direct first, then IAP)
 run_ssh() {
@@ -132,52 +150,34 @@ run_ssh() {
     --quiet 2>/dev/null
 }
 
-# Now wait for setup to complete
-WAITED=0
-while [[ $WAITED -lt $MAX_WAIT ]]; do
-  # Check if setup is complete
-  if run_ssh "test -f /tmp/setup-complete"; then
-    echo ""
-    echo "Setup complete!"
-    break
-  fi
-  
-  # Show progress every 60 seconds
-  if [[ $((WAITED % 60)) -eq 0 ]] && [[ $WAITED -gt 0 ]]; then
-    echo ""
-    echo "[$WAITED seconds] Checking setup progress..."
-    run_ssh "tail -5 /var/log/image-setup.log 2>/dev/null || echo 'Log not ready'" || echo "(unable to read log)"
-  else
-    echo -n "."
-  fi
-  
-  sleep 30
-  WAITED=$((WAITED + 30))
-done
-
-if [[ $WAITED -ge $MAX_WAIT ]]; then
-  echo ""
-  echo "ERROR: Setup timed out after $MAX_WAIT seconds!"
-  echo ""
-  echo "Last setup log entries:"
-  run_ssh "tail -30 /var/log/image-setup.log 2>/dev/null || echo 'No log available'" || echo "(unable to read log)"
-  echo ""
-  echo "Cleaning up..."
-  gcloud compute instances delete "$INSTANCE_NAME" --project="$PROJECT_ID" --zone="$ZONE" --quiet
-  exit 1
-fi
-
-# Get commit info from the instance
+# Get commit info from the instance (try SSH first, fall back to serial output)
 echo ""
 echo "=== Getting commit info ==="
-COMMIT_INFO=$(run_ssh "cat /home/developer/.image-info 2>/dev/null || echo 'COMMIT_SHA=unknown'" || echo "COMMIT_SHA=unknown")
 
-# Parse commit info
-COMMIT_SHA=$(echo "$COMMIT_INFO" | grep "COMMIT_SHA=" | cut -d'=' -f2)
-COMMIT_MSG=$(echo "$COMMIT_INFO" | grep "COMMIT_MSG=" | cut -d'=' -f2-)
-COMMIT_AUTHOR=$(echo "$COMMIT_INFO" | grep "COMMIT_AUTHOR=" | cut -d'=' -f2-)
+# Try SSH first
+COMMIT_INFO=$(run_ssh "cat /home/developer/.image-info 2>/dev/null" 2>/dev/null || echo "")
 
-echo "Commit: $COMMIT_SHA - $COMMIT_MSG ($COMMIT_AUTHOR)"
+# If SSH failed, try to extract from serial output
+if [ -z "$COMMIT_INFO" ]; then
+  echo "SSH unavailable, extracting commit info from serial output..."
+  SERIAL_OUTPUT=$(check_serial_output 2>/dev/null || echo "")
+  # Extract from our formatted output
+  COMMIT_SHA=$(echo "$SERIAL_OUTPUT" | grep "^COMMIT_SHA=" | tail -1 | cut -d'=' -f2)
+  COMMIT_MSG=$(echo "$SERIAL_OUTPUT" | grep "^COMMIT_MSG=" | tail -1 | cut -d'=' -f2-)
+  COMMIT_AUTHOR=$(echo "$SERIAL_OUTPUT" | grep "^COMMIT_AUTHOR=" | tail -1 | cut -d'=' -f2-)
+  if [ -z "$COMMIT_SHA" ]; then
+    COMMIT_SHA="unknown"
+    COMMIT_MSG="Unable to retrieve commit info"
+    COMMIT_AUTHOR="unknown"
+  fi
+else
+  # Parse commit info from SSH output
+  COMMIT_SHA=$(echo "$COMMIT_INFO" | grep "COMMIT_SHA=" | cut -d'=' -f2)
+  COMMIT_MSG=$(echo "$COMMIT_INFO" | grep "COMMIT_MSG=" | cut -d'=' -f2-)
+  COMMIT_AUTHOR=$(echo "$COMMIT_INFO" | grep "COMMIT_AUTHOR=" | cut -d'=' -f2-)
+fi
+
+echo "Commit: ${COMMIT_SHA:-unknown} - ${COMMIT_MSG:-N/A} (${COMMIT_AUTHOR:-unknown})"
 
 # Remove sensitive metadata before creating image
 if [ -n "$GITHUB_TOKEN" ]; then
