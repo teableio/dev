@@ -35,7 +35,6 @@ interface EnvironmentPanelProps {
 }
 
 export function EnvironmentPanel({
-  username: _username, // Reserved for future use
   initialEnvironment,
   initialEnvironments = [],
   baseImage,
@@ -431,7 +430,7 @@ export function EnvironmentPanel({
         )}
 
         {showNewInstanceForm ? (
-          {newInstanceFormJSX}
+          newInstanceFormJSX
         ) : (
           <>
             <div className="max-w-md mx-auto mb-8">
@@ -603,7 +602,7 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
         )}
 
         {showNewInstanceForm ? (
-          {newInstanceFormJSX}
+          newInstanceFormJSX
         ) : (
           <div className="flex items-center justify-center gap-4">
             <button
