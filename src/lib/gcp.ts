@@ -1005,14 +1005,24 @@ curl -X PUT "http://metadata.google.internal/computeMetadata/v1/instance/attribu
 
 # Start ttyd on port 7681 with authentication
 # -W: Writable (allow input)
-# -t: Set terminal type
+# -t: Set terminal options
 # -c: Set credentials (username:password)
 # -p: Port number
-nohup ttyd -W -t fontSize=14 -t fontFamily="'JetBrains Mono', 'Fira Code', monospace" \\
-  -c developer:\$TTYD_PASSWORD \\
+DEVELOPER_UID=\$(id -u developer)
+DEVELOPER_GID=\$(id -g developer)
+
+nohup ttyd -W \\
+  -t fontSize=14 \\
+  -t disableLeaveAlert=true \\
+  -c "developer:\$TTYD_PASSWORD" \\
   -p 7681 \\
-  sudo -u developer -i \\
+  -u \$DEVELOPER_UID \\
+  -g \$DEVELOPER_GID \\
+  /bin/bash -l \\
   > /var/log/teable-services/ttyd.log 2>&1 &
+
+# Wait a moment for ttyd to start
+sleep 1
 
 echo "✓ ttyd web terminal started on port 7681" >> /var/log/startup.log
 
