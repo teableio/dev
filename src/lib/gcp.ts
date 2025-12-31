@@ -844,9 +844,138 @@ fi
 mkdir -p /var/log/teable-services
 chown developer:developer /var/log/teable-services
 
+# Create service control script
+cat > /usr/local/bin/teable-service-control.sh << 'SERVICECONTROL'
+#!/bin/bash
+# Service control script for Teable dev environment
+
+start_backend() {
+  echo "Starting backend service..."
+  pkill -f "pnpm dev-backend" 2>/dev/null || true
+  sleep 1
+  sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/backend-ee && nohup pnpm dev-backend > /var/log/teable-services/backend.log 2>&1 &'
+  echo "Backend started on port 3003"
+}
+
+start_frontend() {
+  echo "Starting frontend service..."
+  pkill -f "pnpm dev.*app-ee" 2>/dev/null || true
+  pkill -f "next-server.*3000" 2>/dev/null || true
+  sleep 1
+  sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/app-ee && nohup pnpm dev > /var/log/teable-services/frontend.log 2>&1 &'
+  echo "Frontend started on port 3000"
+}
+
+restart_backend() {
+  echo "Restarting backend..."
+  start_backend
+}
+
+restart_frontend() {
+  echo "Restarting frontend..."
+  start_frontend
+}
+
+restart_all() {
+  restart_backend
+  sleep 3
+  restart_frontend
+}
+
+case "\$1" in
+  start-backend) start_backend ;;
+  start-frontend) start_frontend ;;
+  restart-backend) restart_backend ;;
+  restart-frontend) restart_frontend ;;
+  restart-all) restart_all ;;
+  *) echo "Usage: \$0 {start-backend|start-frontend|restart-backend|restart-frontend|restart-all}" ;;
+esac
+SERVICECONTROL
+
+chmod +x /usr/local/bin/teable-service-control.sh
+
+# Create simple HTTP control server using Python
+cat > /usr/local/bin/teable-control-server.py << 'CONTROLSERVER'
+#!/usr/bin/env python3
+"""Simple HTTP server for service control"""
+import http.server
+import json
+import subprocess
+import socketserver
+
+PORT = 9999
+
+class ControlHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/restart":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode() if content_length > 0 else "{}"
+            try:
+                data = json.loads(body)
+            except:
+                data = {}
+            
+            service = data.get("service", "all")
+            
+            if service == "frontend":
+                cmd = "/usr/local/bin/teable-service-control.sh restart-frontend"
+            elif service == "backend":
+                cmd = "/usr/local/bin/teable-service-control.sh restart-backend"
+            else:
+                cmd = "/usr/local/bin/teable-service-control.sh restart-all"
+            
+            try:
+                subprocess.Popen(cmd, shell=True)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "service": service}).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Suppress logging
+
+if __name__ == "__main__":
+    with socketserver.TCPServer(("", PORT), ControlHandler) as httpd:
+        print(f"Service control server running on port {PORT}")
+        httpd.serve_forever()
+CONTROLSERVER
+
+chmod +x /usr/local/bin/teable-control-server.py
+
+# Start the control server
+nohup python3 /usr/local/bin/teable-control-server.py > /var/log/teable-services/control-server.log 2>&1 &
+echo "✓ Service control server started on port 9999" >> /var/log/startup.log
+
 # Auto-start backend service (port 3003)
 echo "Starting backend service..." >> /var/log/startup.log
-sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/backend-ee && nohup pnpm dev-backend > /var/log/teable-services/backend.log 2>&1 &'
+/usr/local/bin/teable-service-control.sh start-backend
 echo "✓ Backend service started on port 3003" >> /var/log/startup.log
 
 # Wait a bit for backend to initialize before starting frontend
@@ -854,7 +983,7 @@ sleep 5
 
 # Auto-start frontend service (port 3000)
 echo "Starting frontend service..." >> /var/log/startup.log
-sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/app-ee && nohup pnpm dev > /var/log/teable-services/frontend.log 2>&1 &'
+/usr/local/bin/teable-service-control.sh start-frontend
 echo "✓ Frontend service started on port 3000" >> /var/log/startup.log
 
 echo "All services started successfully!" >> /var/log/startup.log

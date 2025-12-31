@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { DevEnvironment, BaseImageInfo } from "@/lib/gcp";
 import { MACHINE_CONFIGS, DEFAULT_MACHINE_TYPE } from "@/lib/machine-configs";
@@ -25,7 +25,23 @@ import {
   Zap,
   Plus,
   Monitor,
+  RefreshCw,
+  CircleCheck,
+  CircleX,
 } from "lucide-react";
+
+interface ServiceStatus {
+  frontend: {
+    running: boolean;
+    url: string;
+    error?: string;
+  };
+  backend: {
+    running: boolean;
+    url: string;
+    error?: string;
+  };
+}
 
 interface EnvironmentPanelProps {
   username: string;
@@ -54,7 +70,71 @@ export function EnvironmentPanel({
   const [showMachineSelector, setShowMachineSelector] = useState(false);
   const [showNewInstanceForm, setShowNewInstanceForm] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState("");
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
+  const [isCheckingServices, setIsCheckingServices] = useState(false);
+  const [restartingService, setRestartingService] = useState<string | null>(null);
   const router = useRouter();
+
+  // Check service status
+  const checkServiceStatus = useCallback(async (instanceId: string) => {
+    setIsCheckingServices(true);
+    try {
+      const response = await fetch(`/api/environment/services?instanceId=${encodeURIComponent(instanceId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setServiceStatus(data.status);
+      } else {
+        setServiceStatus(null);
+      }
+    } catch (err) {
+      console.error("Error checking service status:", err);
+      setServiceStatus(null);
+    } finally {
+      setIsCheckingServices(false);
+    }
+  }, []);
+
+  // Restart a service
+  const restartService = useCallback(async (service: "frontend" | "backend" | "all") => {
+    if (!environment) return;
+    
+    setRestartingService(service);
+    try {
+      const response = await fetch("/api/environment/services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceId: environment.instanceId, service }),
+      });
+      
+      if (response.ok) {
+        // Wait a bit then refresh status
+        setTimeout(() => {
+          checkServiceStatus(environment.instanceId);
+        }, 5000);
+      } else {
+        const data = await response.json();
+        setError(data.error || "Failed to restart service");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restart service");
+    } finally {
+      setRestartingService(null);
+    }
+  }, [environment, checkServiceStatus]);
+
+  // Auto-check service status when environment is running
+  useEffect(() => {
+    if (environment?.status === "RUNNING" && environment.externalIp) {
+      checkServiceStatus(environment.instanceId);
+      
+      // Poll every 30 seconds
+      const interval = setInterval(() => {
+        checkServiceStatus(environment.instanceId);
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [environment?.status, environment?.externalIp, environment?.instanceId, checkServiceStatus]);
 
   // Get the currently selected environment
   const environment = environments.find(e => e.instanceId === selectedInstanceId) || null;
@@ -854,28 +934,87 @@ echo "✓ SSH configured for all Teable dev environments"`;
             </a>
           </div>
 
+          {/* Service Status Header */}
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-medium text-slate-400">Services</h4>
+            <button
+              onClick={() => checkServiceStatus(environment.instanceId)}
+              disabled={isCheckingServices}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors text-sm disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isCheckingServices ? 'animate-spin' : ''}`} />
+              {isCheckingServices ? 'Checking...' : 'Refresh Status'}
+            </button>
+          </div>
+
           {/* Access URLs - Frontend & Backend */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
             {/* Frontend URL */}
-            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 border border-emerald-500/30">
+            <div className={`p-4 rounded-xl border transition-colors ${
+              serviceStatus?.frontend?.running 
+                ? 'bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 border-emerald-500/30' 
+                : 'bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/30'
+            }`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                    <Monitor className="w-4 h-4 text-emerald-400" />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    serviceStatus?.frontend?.running ? 'bg-emerald-500/20' : 'bg-red-500/20'
+                  }`}>
+                    <Monitor className={`w-4 h-4 ${
+                      serviceStatus?.frontend?.running ? 'text-emerald-400' : 'text-red-400'
+                    }`} />
                   </div>
                   <div>
-                    <div className="text-sm font-medium text-emerald-400">Frontend</div>
-                    <div className="text-xs text-slate-500">Port 3000</div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${
+                        serviceStatus?.frontend?.running ? 'text-emerald-400' : 'text-red-400'
+                      }`}>Frontend</span>
+                      {serviceStatus && (
+                        serviceStatus.frontend.running ? (
+                          <CircleCheck className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <CircleX className="w-4 h-4 text-red-400" />
+                        )
+                      )}
+                      {isCheckingServices && !serviceStatus && (
+                        <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Port 3000 • {serviceStatus?.frontend?.running ? 'Running' : serviceStatus?.frontend?.error || 'Not running'}
+                    </div>
                   </div>
                 </div>
-                <a
-                  href={`http://${environment.externalIp}:3000`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </a>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => restartService("frontend")}
+                    disabled={restartingService !== null}
+                    className={`p-2 rounded-lg transition-colors ${
+                      serviceStatus?.frontend?.running 
+                        ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' 
+                        : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-400'
+                    } disabled:opacity-50`}
+                    title={serviceStatus?.frontend?.running ? 'Restart Frontend' : 'Start Frontend'}
+                  >
+                    {restartingService === "frontend" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                  </button>
+                  <a
+                    href={`http://${environment.externalIp}:3000`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`p-2 rounded-lg transition-colors ${
+                      serviceStatus?.frontend?.running 
+                        ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400' 
+                        : 'bg-slate-500/20 text-slate-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <code className="text-xs font-mono text-slate-300 truncate">{`http://${environment.externalIp}:3000`}</code>
@@ -889,25 +1028,71 @@ echo "✓ SSH configured for all Teable dev environments"`;
             </div>
 
             {/* Backend URL */}
-            <div className="p-4 rounded-xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-500/30">
+            <div className={`p-4 rounded-xl border transition-colors ${
+              serviceStatus?.backend?.running 
+                ? 'bg-gradient-to-r from-orange-500/10 to-amber-500/10 border-orange-500/30' 
+                : 'bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/30'
+            }`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                    <Server className="w-4 h-4 text-orange-400" />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    serviceStatus?.backend?.running ? 'bg-orange-500/20' : 'bg-red-500/20'
+                  }`}>
+                    <Server className={`w-4 h-4 ${
+                      serviceStatus?.backend?.running ? 'text-orange-400' : 'text-red-400'
+                    }`} />
                   </div>
                   <div>
-                    <div className="text-sm font-medium text-orange-400">Backend</div>
-                    <div className="text-xs text-slate-500">Port 3003</div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${
+                        serviceStatus?.backend?.running ? 'text-orange-400' : 'text-red-400'
+                      }`}>Backend</span>
+                      {serviceStatus && (
+                        serviceStatus.backend.running ? (
+                          <CircleCheck className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <CircleX className="w-4 h-4 text-red-400" />
+                        )
+                      )}
+                      {isCheckingServices && !serviceStatus && (
+                        <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Port 3003 • {serviceStatus?.backend?.running ? 'Running' : serviceStatus?.backend?.error || 'Not running'}
+                    </div>
                   </div>
                 </div>
-                <a
-                  href={`http://${environment.externalIp}:3003`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </a>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => restartService("backend")}
+                    disabled={restartingService !== null}
+                    className={`p-2 rounded-lg transition-colors ${
+                      serviceStatus?.backend?.running 
+                        ? 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-400' 
+                        : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-400'
+                    } disabled:opacity-50`}
+                    title={serviceStatus?.backend?.running ? 'Restart Backend' : 'Start Backend'}
+                  >
+                    {restartingService === "backend" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                  </button>
+                  <a
+                    href={`http://${environment.externalIp}:3003`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`p-2 rounded-lg transition-colors ${
+                      serviceStatus?.backend?.running 
+                        ? 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-400' 
+                        : 'bg-slate-500/20 text-slate-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <code className="text-xs font-mono text-slate-300 truncate">{`http://${environment.externalIp}:3003`}</code>
@@ -919,6 +1104,27 @@ echo "✓ SSH configured for all Teable dev environments"`;
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Restart All Services Button */}
+          <div className="flex justify-center mb-6">
+            <button
+              onClick={() => restartService("all")}
+              disabled={restartingService !== null}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-emerald-500/20 border border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-emerald-500/30 transition-colors disabled:opacity-50"
+            >
+              {restartingService === "all" ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Restarting All Services...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  Restart All Services
+                </>
+              )}
+            </button>
           </div>
 
           {/* SSH Command */}
