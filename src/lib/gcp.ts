@@ -70,6 +70,18 @@ function sanitizeForGCP(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 }
 
+// Generate a random alphanumeric password
+function generateRandomPassword(length: number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  const randomBytes = new Uint8Array(length);
+  crypto.getRandomValues(randomBytes);
+  for (let i = 0; i < length; i++) {
+    result += chars[randomBytes[i] % chars.length];
+  }
+  return result;
+}
+
 function getInstanceName(username: string, instanceId: string = DEFAULT_INSTANCE_ID): string {
   const sanitizedUser = sanitizeForGCP(username);
   const sanitizedId = sanitizeForGCP(instanceId);
@@ -229,6 +241,9 @@ export async function createDevEnvironment(
 
   const now = new Date().toISOString();
   const hasSnap = await snapshotExists(username);
+  
+  // Generate ttyd password upfront (metadata API is read-only, so we can't set it from startup script)
+  const ttydPassword = generateRandomPassword(16);
 
   // Determine which machine configs to try
   // If user specified a machine type, use only that one
@@ -316,8 +331,12 @@ export async function createDevEnvironment(
                 value: instanceId,
               },
               {
+                key: "ttyd-password",
+                value: ttydPassword,
+              },
+              {
                 key: "startup-script",
-                value: getStartupScript(username, hasSnap, token),
+                value: getStartupScript(username, hasSnap, token, ttydPassword),
               },
             ],
           },
@@ -749,7 +768,7 @@ async function waitForOperation(operationName: string): Promise<void> {
   throw new Error("Operation timed out");
 }
 
-function getStartupScript(username: string, isRestore: boolean = false, githubToken?: string): string {
+function getStartupScript(username: string, isRestore: boolean = false, githubToken?: string, ttydPassword?: string): string {
   // GitHub token credential setup for developer user
   const devTokenSetup = githubToken
     ? `
@@ -1010,13 +1029,9 @@ echo "✓ Frontend service started on port 3000" >> /var/log/startup.log
 # Start ttyd web terminal service
 echo "Starting ttyd web terminal..." >> /var/log/startup.log
 
-# Generate a random password for ttyd authentication (use more bytes to ensure 16 chars after filtering)
-TTYD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
-
-# Store the password in VM metadata for the dashboard to retrieve
-curl -X PUT "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ttyd-password" \\
-  -H "Metadata-Flavor: Google" \\
-  -d "\$TTYD_PASSWORD" 2>/dev/null || true
+# Get ttyd password from metadata (set during VM creation)
+TTYD_PASSWORD=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/ttyd-password 2>/dev/null || echo "defaultpass")
+echo "ttyd password retrieved from metadata" >> /var/log/startup.log
 
 # Start ttyd on port 7681 with authentication
 # -W: Writable (allow input)
