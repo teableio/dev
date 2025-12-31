@@ -75,6 +75,9 @@ export function EnvironmentPanel({
   const [restartingService, setRestartingService] = useState<string | null>(null);
   const router = useRouter();
 
+  // Get the currently selected environment (must be before hooks that use it)
+  const environment = environments.find(e => e.instanceId === selectedInstanceId) || null;
+
   // Check service status
   const checkServiceStatus = useCallback(async (instanceId: string) => {
     setIsCheckingServices(true);
@@ -135,9 +138,6 @@ export function EnvironmentPanel({
       return () => clearInterval(interval);
     }
   }, [environment?.status, environment?.externalIp, environment?.instanceId, checkServiceStatus]);
-
-  // Get the currently selected environment
-  const environment = environments.find(e => e.instanceId === selectedInstanceId) || null;
 
   // Refresh environments list
   const refreshEnvironments = useCallback(async () => {

@@ -21,7 +21,7 @@ async function checkServiceHealth(url: string, timeoutMs = 5000): Promise<{ runn
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(url, {
+    await fetch(url, {
       method: "GET",
       signal: controller.signal,
       // Don't follow redirects, just check if the service responds
