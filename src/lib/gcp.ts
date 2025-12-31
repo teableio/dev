@@ -817,6 +817,49 @@ nohup /usr/local/bin/ssh-activity-monitor.sh &
 echo "Dev environment ready!" >> /var/log/startup.log
 `;
 
-  return commonSetup + freshSetup + activityMonitor;
+  // Auto-start frontend and backend services
+  const autoStartServices = `
+# Ensure enterprise/app-ee/.env.development.local has SERVER_PORT=3003
+ENTERPRISE_APP_ENV="/home/developer/workspace/teable-ee/enterprise/app-ee/.env.development.local"
+if [ -f "\$ENTERPRISE_APP_ENV" ]; then
+  # Check if SERVER_PORT exists
+  if grep -q "^SERVER_PORT=" "\$ENTERPRISE_APP_ENV"; then
+    # Update existing SERVER_PORT
+    sed -i 's/^SERVER_PORT=.*/SERVER_PORT=3003/' "\$ENTERPRISE_APP_ENV"
+    echo "✓ Updated SERVER_PORT=3003 in .env.development.local" >> /var/log/startup.log
+  else
+    # Add SERVER_PORT if not present
+    echo "SERVER_PORT=3003" >> "\$ENTERPRISE_APP_ENV"
+    echo "✓ Added SERVER_PORT=3003 to .env.development.local" >> /var/log/startup.log
+  fi
+else
+  # Create the file if it doesn't exist
+  mkdir -p "$(dirname "\$ENTERPRISE_APP_ENV")"
+  echo "SERVER_PORT=3003" > "\$ENTERPRISE_APP_ENV"
+  chown developer:developer "\$ENTERPRISE_APP_ENV"
+  echo "✓ Created .env.development.local with SERVER_PORT=3003" >> /var/log/startup.log
+fi
+
+# Create log directory for services
+mkdir -p /var/log/teable-services
+chown developer:developer /var/log/teable-services
+
+# Auto-start backend service (port 3003)
+echo "Starting backend service..." >> /var/log/startup.log
+sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/backend-ee && nohup pnpm dev-backend > /var/log/teable-services/backend.log 2>&1 &'
+echo "✓ Backend service started on port 3003" >> /var/log/startup.log
+
+# Wait a bit for backend to initialize before starting frontend
+sleep 5
+
+# Auto-start frontend service (port 3000)
+echo "Starting frontend service..." >> /var/log/startup.log
+sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee/enterprise/app-ee && nohup pnpm dev > /var/log/teable-services/frontend.log 2>&1 &'
+echo "✓ Frontend service started on port 3000" >> /var/log/startup.log
+
+echo "All services started successfully!" >> /var/log/startup.log
+`;
+
+  return commonSetup + freshSetup + activityMonitor + autoStartServices;
 }
 

@@ -854,6 +854,73 @@ echo "✓ SSH configured for all Teable dev environments"`;
             </a>
           </div>
 
+          {/* Access URLs - Frontend & Backend */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            {/* Frontend URL */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 border border-emerald-500/30">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <Monitor className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-emerald-400">Frontend</div>
+                    <div className="text-xs text-slate-500">Port 3000</div>
+                  </div>
+                </div>
+                <a
+                  href={`http://${environment.externalIp}:3000`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+              <div className="flex items-center justify-between">
+                <code className="text-xs font-mono text-slate-300 truncate">{`http://${environment.externalIp}:3000`}</code>
+                <button
+                  onClick={() => copyToClipboard(`http://${environment.externalIp}:3000`, "frontend-url")}
+                  className="ml-2 p-1.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 transition-colors flex-shrink-0"
+                >
+                  {copied === "frontend-url" ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Backend URL */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-500/30">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                    <Server className="w-4 h-4 text-orange-400" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-orange-400">Backend</div>
+                    <div className="text-xs text-slate-500">Port 3003</div>
+                  </div>
+                </div>
+                <a
+                  href={`http://${environment.externalIp}:3003`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+              <div className="flex items-center justify-between">
+                <code className="text-xs font-mono text-slate-300 truncate">{`http://${environment.externalIp}:3003`}</code>
+                <button
+                  onClick={() => copyToClipboard(`http://${environment.externalIp}:3003`, "backend-url")}
+                  className="ml-2 p-1.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 transition-colors flex-shrink-0"
+                >
+                  {copied === "backend-url" ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* SSH Command */}
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] mb-6">
             <div className="flex items-center justify-between">
