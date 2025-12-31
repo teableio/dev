@@ -28,7 +28,6 @@ import {
   RefreshCw,
   CircleCheck,
   CircleX,
-  Terminal,
 } from "lucide-react";
 import { WebTerminal, WebTerminalButton } from "./web-terminal";
 
@@ -128,32 +127,66 @@ export function EnvironmentPanel({
     }
   }, [environment, checkServiceStatus]);
 
-  // Auto-check service status when environment is running
-  useEffect(() => {
-    if (environment?.status === "RUNNING" && environment.externalIp) {
-      checkServiceStatus(environment.instanceId);
-      
-      // Poll every 30 seconds
-      const interval = setInterval(() => {
-        checkServiceStatus(environment.instanceId);
-      }, 30000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [environment?.status, environment?.externalIp, environment?.instanceId, checkServiceStatus]);
-
-  // Refresh environments list
+  // Refresh environments list (also fetches individual environment for latest metadata)
   const refreshEnvironments = useCallback(async () => {
     try {
-      const response = await fetch("/api/environment");
-      const data = await response.json();
-      if (data.environments) {
-        setEnvironments(data.environments);
+      // First, get the full list
+      const listResponse = await fetch("/api/environment");
+      const listData = await listResponse.json();
+      
+      if (listData.environments) {
+        // For each running environment, fetch its individual data to get latest metadata
+        // (instancesClient.list may not have the most recent metadata like ttyd-password)
+        const updatedEnvironments = await Promise.all(
+          listData.environments.map(async (env: DevEnvironment) => {
+            if (env.status === "RUNNING" && !env.ttydPassword) {
+              // Fetch individual environment to get latest metadata
+              try {
+                const envResponse = await fetch(`/api/environment?instanceId=${encodeURIComponent(env.instanceId)}`);
+                const envData = await envResponse.json();
+                if (envData.environment) {
+                  return envData.environment;
+                }
+              } catch {
+                // Fall back to list data
+              }
+            }
+            return env;
+          })
+        );
+        setEnvironments(updatedEnvironments);
       }
     } catch (err) {
       console.error("Error refreshing environments:", err);
     }
   }, []);
+
+  // Auto-check service status and refresh environment data when running
+  useEffect(() => {
+    if (environment?.status === "RUNNING" && environment.externalIp) {
+      // Initial checks
+      checkServiceStatus(environment.instanceId);
+      
+      // If no password yet, refresh environment data to get it
+      // (ttyd password is set by startup script which takes a few seconds)
+      if (!environment.ttydPassword) {
+        const passwordPollInterval = setInterval(async () => {
+          await refreshEnvironments();
+        }, 5000); // Check every 5 seconds for password
+        
+        // Stop polling after 60 seconds (startup script should be done by then)
+        setTimeout(() => clearInterval(passwordPollInterval), 60000);
+      }
+      
+      // Poll service status every 30 seconds
+      const interval = setInterval(() => {
+        checkServiceStatus(environment.instanceId);
+        refreshEnvironments(); // Also refresh environment data
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [environment?.status, environment?.externalIp, environment?.instanceId, environment?.ttydPassword, checkServiceStatus, refreshEnvironments]);
 
   // Poll for environment status until target state is reached
   const pollUntilStatus = useCallback(async (
@@ -217,7 +250,30 @@ export function EnvironmentPanel({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create environment");
+        const errorMsg = data.error || "Failed to create environment";
+        
+        // Check if this is a quota exhausted error
+        if (errorMsg.startsWith("QUOTA_EXHAUSTED:")) {
+          // Parse the error: QUOTA_EXHAUSTED:machineType:message
+          const parts = errorMsg.split(":");
+          const exhaustedMachineType = parts[1];
+          const userMessage = parts.slice(2).join(":");
+          
+          // Find alternative machine types
+          const currentIndex = MACHINE_CONFIGS.findIndex(c => c.machineType === exhaustedMachineType);
+          const alternatives = MACHINE_CONFIGS.filter((_, i) => i !== currentIndex);
+          
+          if (alternatives.length > 0) {
+            // Suggest the next available machine type
+            const nextConfig = alternatives[0];
+            setSelectedMachineType(nextConfig.machineType);
+            setShowMachineSelector(true); // Open the selector so user can see options
+          }
+          
+          throw new Error(userMessage);
+        }
+        
+        throw new Error(errorMsg);
       }
 
       // Initial environment created, now poll until RUNNING
@@ -508,7 +564,17 @@ export function EnvironmentPanel({
 
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm max-w-md mx-auto">
-            {error}
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">{error}</p>
+                {error.includes("unavailable") && (
+                  <p className="mt-2 text-slate-400">
+                    👆 Please select a different machine type above and try again.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -679,51 +745,68 @@ echo "✓ Ready! You can now click 'Open in Cursor/VS Code'"`;
         </p>
 
         {error && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-            {error}
+          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm max-w-md mx-auto">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">{error}</p>
+                {error.includes("unavailable") && (
+                  <p className="mt-2 text-slate-400">
+                    The selected machine type is out of capacity. Please try again later or contact support.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {showNewInstanceForm ? (
           newInstanceFormJSX
         ) : (
-          <div className="flex items-center justify-center gap-4">
-            <button
-              onClick={() => createEnvironment(environment.instanceId)}
-              disabled={isCreating || isDeleting}
-              className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-            >
-              {isCreating ? (
-                <>
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                  Resuming...
-                </>
-              ) : (
-                <>
-                  <Play className="w-6 h-6" />
-                  Resume Environment
-                </>
-              )}
-            </button>
+          <>
+            {/* Machine type selector for resume - useful when quota is exhausted */}
+            <div className="max-w-md mx-auto mb-6">
+              {machineTypeSelectorJSX}
+            </div>
 
-            <button
-              onClick={deleteEnvironment}
-              disabled={isCreating || isDeleting}
-              className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-red-500/10 text-red-400 font-semibold hover:bg-red-500/20 transition-all disabled:opacity-50"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Resetting...
-                </>
-              ) : (
-                <>
-                  <RotateCcw className="w-5 h-5" />
-                  Reset
-                </>
-              )}
-            </button>
-          </div>
+            <div className="flex items-center justify-center gap-4">
+              <button
+                onClick={() => createEnvironment(environment.instanceId)}
+                disabled={isCreating || isDeleting}
+                className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-lg hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    Resuming...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-6 h-6" />
+                    Resume Environment
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={deleteEnvironment}
+                disabled={isCreating || isDeleting}
+                className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-red-500/10 text-red-400 font-semibold hover:bg-red-500/20 transition-all disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Resetting...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-5 h-5" />
+                    Reset
+                  </>
+                )}
+              </button>
+            </div>
+          </>
         )}
 
         <p className="mt-6 text-sm text-slate-500">
@@ -885,6 +968,8 @@ echo "✓ SSH configured for all Teable dev environments"`;
           ttydPassword={environment.ttydPassword}
           instanceId={environment.instanceId}
           onClose={() => setShowWebTerminal(false)}
+          onRefresh={refreshEnvironments}
+          isRefreshing={isCheckingServices}
         />
       )}
 

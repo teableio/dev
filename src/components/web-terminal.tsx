@@ -8,6 +8,8 @@ import {
   Check,
   Key,
   Globe,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react"
 
 interface WebTerminalProps {
@@ -15,6 +17,8 @@ interface WebTerminalProps {
   ttydPassword: string | null
   instanceId: string
   onClose?: () => void
+  onRefresh?: () => void
+  isRefreshing?: boolean
 }
 
 export function WebTerminal({
@@ -22,6 +26,8 @@ export function WebTerminal({
   ttydPassword,
   instanceId,
   onClose,
+  onRefresh,
+  isRefreshing,
 }: WebTerminalProps) {
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -112,10 +118,35 @@ export function WebTerminal({
 
         {/* Credentials Section */}
         <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
-          <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-            <Key className="w-4 h-4" />
-            Login Credentials (if prompted)
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+              <Key className="w-4 h-4" />
+              Login Credentials (if prompted)
+            </h4>
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-700 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+            )}
+          </div>
+          
+          {/* No password warning */}
+          {!ttydPassword && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-400">
+                <p className="font-medium">Password not ready yet</p>
+                <p className="text-amber-400/70 mt-1">
+                  The startup script is still initializing. Click &quot;Refresh&quot; to check again, or wait a moment.
+                </p>
+              </div>
+            </div>
+          )}
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Username */}
@@ -137,11 +168,11 @@ export function WebTerminal({
             </div>
 
             {/* Password */}
-            <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2">
+            <div className={`flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2 ${!ttydPassword ? 'border border-amber-500/30' : ''}`}>
               <div>
                 <div className="text-xs text-slate-500">Password</div>
-                <div className="text-white font-mono">
-                  {ttydPassword || "(no password)"}
+                <div className={`font-mono ${ttydPassword ? 'text-white' : 'text-amber-400'}`}>
+                  {ttydPassword || "(loading...)"}
                 </div>
               </div>
               {ttydPassword && (

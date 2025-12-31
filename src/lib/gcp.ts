@@ -243,6 +243,7 @@ export async function createDevEnvironment(
 
   // Try each machine type in order until one succeeds
   let lastError: Error | null = null;
+  let quotaExhaustedMachineType: string | null = null;
   
   for (const config of configsToTry) {
     console.log(`Trying to create instance with ${config.machineType}...`);
@@ -354,8 +355,10 @@ export async function createDevEnvironment(
       
       // Check if it's a quota error - try next machine type
       if (errorMessage.includes("Quota") || errorMessage.includes("quota") || 
-          errorMessage.includes("CPUS_PER_VM_FAMILY") || errorMessage.includes("exceeded")) {
-        console.log(`Quota exceeded for ${config.machineType}, trying next option...`);
+          errorMessage.includes("CPUS_PER_VM_FAMILY") || errorMessage.includes("exceeded") ||
+          errorMessage.includes("ZONE_RESOURCE_POOL_EXHAUSTED") || errorMessage.includes("does not have enough resources")) {
+        console.log(`Quota/resource exhausted for ${config.machineType}, trying next option...`);
+        quotaExhaustedMachineType = config.machineType;
         lastError = error as Error;
         continue;
       }
@@ -365,8 +368,20 @@ export async function createDevEnvironment(
     }
   }
 
-  // All machine types failed
-  throw lastError || new Error("Failed to create environment: all machine types exhausted");
+  // All machine types failed - provide a clear error message
+  if (quotaExhaustedMachineType) {
+    // If user specified a machine type and it's exhausted
+    if (requestedMachineType) {
+      const config = MACHINE_CONFIGS.find(c => c.machineType === requestedMachineType);
+      const displayName = config?.displayName || requestedMachineType;
+      throw new Error(`QUOTA_EXHAUSTED:${requestedMachineType}:Machine type "${displayName}" is currently unavailable (quota exhausted). Please select a different machine type.`);
+    } else {
+      // All automatic fallback options exhausted
+      throw new Error("All machine types are currently unavailable. Please try again later or contact support.");
+    }
+  }
+  
+  throw lastError || new Error("Failed to create environment: unknown error");
 }
 
 export async function getDevEnvironment(
