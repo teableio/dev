@@ -1,21 +1,18 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback } from "react"
 import {
   Terminal,
-  Maximize2,
-  Minimize2,
-  X,
   ExternalLink,
-  RefreshCw,
-  AlertCircle,
-  Loader2,
+  Copy,
+  Check,
+  Key,
+  Globe,
 } from "lucide-react"
 
 interface WebTerminalProps {
   externalIp: string
   ttydPassword: string | null
-  username: string
   instanceId: string
   onClose?: () => void
 }
@@ -23,58 +20,20 @@ interface WebTerminalProps {
 export function WebTerminal({
   externalIp,
   ttydPassword,
-  username,
   instanceId,
   onClose,
 }: WebTerminalProps) {
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [hasError, setHasError] = useState(false)
-  const [retryCount, setRetryCount] = useState(0)
-  const [usePopup, setUsePopup] = useState(false)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [copied, setCopied] = useState<string | null>(null)
 
-  // Build ttyd URL - Note: Basic Auth in URL may not work in iframe due to browser security
-  // We'll try iframe first, but provide popup fallback
   const ttydPort = 7681
   const baseUrl = `http://${externalIp}:${ttydPort}`
   
-  // For iframe, we try without auth first (ttyd may be configured without auth in some cases)
-  // For popup/new tab, we use auth URL
+  // URL with embedded credentials for direct access
   const ttydAuthUrl = ttydPassword
     ? `http://developer:${ttydPassword}@${externalIp}:${ttydPort}`
     : baseUrl
 
-  // URL without credentials for display
-  const displayUrl = baseUrl
-
-  const handleIframeLoad = useCallback(() => {
-    setIsLoading(false)
-    setHasError(false)
-  }, [])
-
-  const handleIframeError = useCallback(() => {
-    setIsLoading(false)
-    setHasError(true)
-  }, [])
-
-  const handleRetry = useCallback(() => {
-    setIsLoading(true)
-    setHasError(false)
-    setRetryCount((c) => c + 1)
-    // Force iframe reload by updating key
-    if (iframeRef.current) {
-      iframeRef.current.src = baseUrl
-    }
-  }, [baseUrl])
-
-  const handleOpenExternal = useCallback(() => {
-    // Open with auth URL in new tab
-    window.open(ttydAuthUrl, "_blank")
-  }, [ttydAuthUrl])
-
-  const handleUsePopup = useCallback(() => {
-    setUsePopup(true)
+  const handleOpenTerminal = useCallback(() => {
     // Open in popup window for better terminal experience
     const width = 1024
     const height = 768
@@ -83,31 +42,22 @@ export function WebTerminal({
     window.open(
       ttydAuthUrl,
       `terminal-${instanceId}`,
-      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,menubar=no,toolbar=no`
     )
   }, [ttydAuthUrl, instanceId])
 
-  const toggleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev)
+  const handleOpenInTab = useCallback(() => {
+    window.open(ttydAuthUrl, "_blank")
+  }, [ttydAuthUrl])
+
+  const copyToClipboard = useCallback((text: string, key: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(key)
+    setTimeout(() => setCopied(null), 2000)
   }, [])
 
-  // Auto-retry a few times if loading fails
-  useEffect(() => {
-    if (hasError && retryCount < 3) {
-      const timer = setTimeout(() => {
-        handleRetry()
-      }, 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [hasError, retryCount, handleRetry])
-
-  // Container classes based on fullscreen state
-  const containerClasses = isFullscreen
-    ? "fixed inset-0 z-50 bg-slate-950"
-    : "rounded-2xl bg-slate-900 border border-slate-700 overflow-hidden"
-
   return (
-    <div className={containerClasses}>
+    <div className="rounded-2xl bg-slate-900 border border-slate-700 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-slate-800/50 border-b border-slate-700">
         <div className="flex items-center gap-3">
@@ -117,203 +67,179 @@ export function WebTerminal({
           <div>
             <h3 className="text-sm font-medium text-white">Web Terminal</h3>
             <p className="text-xs text-slate-400">
-              developer@{instanceId} • {externalIp}
+              developer@{instanceId} • {externalIp}:{ttydPort}
             </p>
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Status indicator */}
-          {isLoading && (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-500/10 text-amber-400 text-xs">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Connecting...
-            </div>
-          )}
-          {hasError && retryCount >= 3 && (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-red-500/10 text-red-400 text-xs">
-              <AlertCircle className="w-3 h-3" />
-              Connection failed
-            </div>
-          )}
-
-          {/* Retry button */}
+        {onClose && (
           <button
-            onClick={handleRetry}
-            className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors"
-            title="Refresh terminal"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white text-sm"
           >
-            <RefreshCw className="w-4 h-4" />
+            ✕
           </button>
-
-          {/* Open in new tab */}
-          <button
-            onClick={handleOpenExternal}
-            className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors"
-            title="Open in new tab"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-
-          {/* Fullscreen toggle */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-2 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors"
-            title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-4 h-4" />
-            ) : (
-              <Maximize2 className="w-4 h-4" />
-            )}
-          </button>
-
-          {/* Close button */}
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-              title="Close terminal"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Terminal content */}
-      <div
-        className={`relative bg-black ${isFullscreen ? "h-[calc(100vh-57px)]" : "h-[500px]"}`}
-      >
-        {/* Loading overlay */}
-        {isLoading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-10">
-            <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mb-4" />
-            <p className="text-slate-400 text-sm">Connecting to terminal...</p>
-            <p className="text-slate-500 text-xs mt-2">
-              This may take a few seconds on first connection
-            </p>
-          </div>
-        )}
+      {/* Content */}
+      <div className="p-6 space-y-6">
+        {/* Info message */}
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+          <p className="text-amber-400 text-sm">
+            <strong>Note:</strong> Due to browser security (HTTPS → HTTP), the terminal opens in a new window.
+            Credentials are automatically included in the URL.
+          </p>
+        </div>
 
-        {/* Error overlay */}
-        {hasError && retryCount >= 3 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-10">
-            <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
-            <p className="text-white font-medium mb-2">
-              Unable to connect to terminal
-            </p>
-            <p className="text-slate-400 text-sm mb-4 max-w-md text-center">
-              The web terminal service may still be starting up. This usually
-              takes 1-2 minutes after the environment starts.
-            </p>
-            <div className="flex flex-col gap-3 items-center">
-              <div className="flex gap-3">
-                <button
-                  onClick={handleRetry}
-                  className="px-4 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors text-sm font-medium"
-                >
-                  Try Again
-                </button>
-                <button
-                  onClick={handleUsePopup}
-                  className="px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors text-sm font-medium"
-                >
-                  Open in Popup
-                </button>
+        {/* Open Terminal Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <button
+            onClick={handleOpenTerminal}
+            className="flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-medium hover:opacity-90 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <Terminal className="w-5 h-5" />
+            Open Terminal (Popup)
+          </button>
+          
+          <button
+            onClick={handleOpenInTab}
+            className="flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <ExternalLink className="w-5 h-5" />
+            Open in New Tab
+          </button>
+        </div>
+
+        {/* Credentials Section */}
+        <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
+          <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+            <Key className="w-4 h-4" />
+            Login Credentials (if prompted)
+          </h4>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Username */}
+            <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2">
+              <div>
+                <div className="text-xs text-slate-500">Username</div>
+                <div className="text-white font-mono">developer</div>
               </div>
               <button
-                onClick={handleOpenExternal}
-                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors text-sm font-medium"
+                onClick={() => copyToClipboard("developer", "username")}
+                className="p-2 rounded hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
               >
-                Open in New Tab
+                {copied === "username" ? (
+                  <Check className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
               </button>
+            </div>
+
+            {/* Password */}
+            <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2">
+              <div>
+                <div className="text-xs text-slate-500">Password</div>
+                <div className="text-white font-mono">
+                  {ttydPassword || "(no password)"}
+                </div>
+              </div>
               {ttydPassword && (
-                <p className="text-xs text-slate-500 mt-2">
-                  Credentials: developer / {ttydPassword}
-                </p>
+                <button
+                  onClick={() => copyToClipboard(ttydPassword, "password")}
+                  className="p-2 rounded hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                >
+                  {copied === "password" ? (
+                    <Check className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
               )}
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Popup mode indicator */}
-        {usePopup && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-10">
-            <Terminal className="w-12 h-12 text-emerald-400 mb-4" />
-            <p className="text-white font-medium mb-2">
-              Terminal opened in popup window
-            </p>
-            <p className="text-slate-400 text-sm mb-4">
-              Check your popup window for the terminal
-            </p>
+        {/* Direct URL */}
+        <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
+          <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+            <Globe className="w-4 h-4" />
+            Direct URL
+          </h4>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 bg-slate-900 rounded-lg px-3 py-2 text-sm text-emerald-400 font-mono overflow-x-auto">
+              {baseUrl}
+            </code>
             <button
-              onClick={() => setUsePopup(false)}
-              className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors text-sm font-medium"
+              onClick={() => copyToClipboard(baseUrl, "url")}
+              className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
             >
-              Show Embedded Terminal
+              {copied === "url" ? (
+                <Check className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
             </button>
           </div>
-        )}
+        </div>
 
-        {/* ttyd iframe - use base URL without auth, browser will prompt if needed */}
-        {!usePopup && (
-          <iframe
-            ref={iframeRef}
-            key={retryCount}
-            src={baseUrl}
-            className="w-full h-full border-0"
-            onLoad={handleIframeLoad}
-            onError={handleIframeError}
-            title={`Terminal - ${instanceId}`}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          />
-        )}
-      </div>
-
-      {/* Footer with tips */}
-      <div className="px-4 py-2 bg-slate-800/30 border-t border-slate-700/50">
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <div className="flex items-center gap-4">
-            <span>
-              💡 Tip: Type <code className="bg-slate-700 px-1 rounded">claude</code> to start Claude Code AI assistant
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span>User: developer</span>
-            <span>•</span>
-            <span>Port: {ttydPort}</span>
-          </div>
+        {/* Tips */}
+        <div className="text-center text-xs text-slate-500">
+          💡 Type <code className="bg-slate-700 px-1.5 py-0.5 rounded text-emerald-400">claude</code> in the terminal to start Claude Code AI assistant
         </div>
       </div>
     </div>
   )
 }
 
-// Compact button to open terminal
+// Compact button to open terminal directly
 interface WebTerminalButtonProps {
-  onClick: () => void
+  externalIp: string
+  ttydPassword: string | null
+  instanceId: string
   disabled?: boolean
 }
 
-export function WebTerminalButton({ onClick, disabled }: WebTerminalButtonProps) {
+export function WebTerminalButton({ 
+  externalIp, 
+  ttydPassword, 
+  instanceId,
+  disabled 
+}: WebTerminalButtonProps) {
+  const ttydPort = 7681
+  const ttydAuthUrl = ttydPassword
+    ? `http://developer:${ttydPassword}@${externalIp}:${ttydPort}`
+    : `http://${externalIp}:${ttydPort}`
+
+  const handleClick = useCallback(() => {
+    // Open in popup window
+    const width = 1024
+    const height = 768
+    const left = (window.screen.width - width) / 2
+    const top = (window.screen.height - height) / 2
+    window.open(
+      ttydAuthUrl,
+      `terminal-${instanceId}`,
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,menubar=no,toolbar=no`
+    )
+  }, [ttydAuthUrl, instanceId])
+
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
       disabled={disabled}
-      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 hover:border-emerald-500/50 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 hover:border-emerald-500/50 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 w-full"
     >
       <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 flex items-center justify-center">
         <Terminal className="w-5 h-5 text-emerald-400" />
       </div>
-      <div className="text-left">
-        <div className="font-medium text-white">Web Terminal</div>
+      <div className="text-left flex-1">
+        <div className="font-medium text-white">Open Web Terminal</div>
         <div className="text-xs text-slate-400">
-          Open terminal in browser • Claude Code ready
+          Opens in new window • Claude Code ready
         </div>
       </div>
-      <ExternalLink className="w-4 h-4 text-slate-400 ml-auto" />
+      <ExternalLink className="w-4 h-4 text-slate-400" />
     </button>
   )
 }
-

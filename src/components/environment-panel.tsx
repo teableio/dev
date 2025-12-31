@@ -878,12 +878,11 @@ echo "✓ SSH configured for all Teable dev environments"`;
         </div>
       </div>
 
-      {/* Web Terminal */}
+      {/* Web Terminal Panel */}
       {isRunning && environment.externalIp && showWebTerminal && (
         <WebTerminal
           externalIp={environment.externalIp}
           ttydPassword={environment.ttydPassword}
-          username="developer"
           instanceId={environment.instanceId}
           onClose={() => setShowWebTerminal(false)}
         />
@@ -895,11 +894,19 @@ echo "✓ SSH configured for all Teable dev environments"`;
           <h3 className="text-lg font-semibold mb-6">Connect</h3>
 
           {/* Web Terminal Button - Most prominent */}
-          <div className="mb-6">
+          <div className="mb-6 flex gap-3">
             <WebTerminalButton
-              onClick={() => setShowWebTerminal(true)}
-              disabled={showWebTerminal}
+              externalIp={environment.externalIp}
+              ttydPassword={environment.ttydPassword}
+              instanceId={environment.instanceId}
+              disabled={false}
             />
+            <button
+              onClick={() => setShowWebTerminal(!showWebTerminal)}
+              className="px-4 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium transition-colors"
+            >
+              {showWebTerminal ? "Hide Details" : "Show Details"}
+            </button>
           </div>
 
           {/* Quick Connect - IDE buttons */}
