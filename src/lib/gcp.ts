@@ -60,6 +60,7 @@ export interface DevEnvironment {
   machineType: string;
   zone: string;
   hasSnapshot: boolean;
+  ttydPassword: string | null; // Password for ttyd web terminal authentication
 }
 
 // Default instance ID for backward compatibility
@@ -403,6 +404,7 @@ export async function getDevEnvironment(
       machineType: actualMachineType,
       zone: ZONE,
       hasSnapshot: hasSnap,
+      ttydPassword: getMetadata("ttyd-password") || null,
     };
   } catch (error) {
     // Instance doesn't exist - check for 404 or gRPC code 5 (NOT_FOUND)
@@ -423,6 +425,7 @@ export async function getDevEnvironment(
           machineType: DEFAULT_MACHINE_TYPE,
           zone: ZONE,
           hasSnapshot: true,
+          ttydPassword: null,
         };
       }
       return null;
@@ -600,6 +603,7 @@ export async function listAllDevEnvironments(): Promise<DevEnvironment[]> {
         machineType: actualMachineType,
         zone: ZONE,
         hasSnapshot: hasSnap,
+        ttydPassword: getMetadata("ttyd-password") || null,
       });
     }
   } catch (error) {
@@ -647,6 +651,7 @@ export async function listUserEnvironments(username: string): Promise<DevEnviron
         machineType: actualMachineType,
         zone: ZONE,
         hasSnapshot: hasSnap,
+        ttydPassword: getMetadata("ttyd-password") || null,
       });
     }
   } catch (error) {
@@ -683,6 +688,7 @@ export async function listUserEnvironments(username: string): Promise<DevEnviron
         machineType: DEFAULT_MACHINE_TYPE,
         zone: ZONE,
         hasSnapshot: true,
+        ttydPassword: null,
       });
     }
   } catch (error) {
@@ -985,6 +991,30 @@ sleep 5
 echo "Starting frontend service..." >> /var/log/startup.log
 /usr/local/bin/teable-service-control.sh start-frontend
 echo "✓ Frontend service started on port 3000" >> /var/log/startup.log
+
+# Start ttyd web terminal service
+echo "Starting ttyd web terminal..." >> /var/log/startup.log
+
+# Generate a random password for ttyd authentication
+TTYD_PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
+
+# Store the password in VM metadata for the dashboard to retrieve
+curl -X PUT "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ttyd-password" \\
+  -H "Metadata-Flavor: Google" \\
+  -d "\$TTYD_PASSWORD" 2>/dev/null || true
+
+# Start ttyd on port 7681 with authentication
+# -W: Writable (allow input)
+# -t: Set terminal type
+# -c: Set credentials (username:password)
+# -p: Port number
+nohup ttyd -W -t fontSize=14 -t fontFamily="'JetBrains Mono', 'Fira Code', monospace" \\
+  -c developer:\$TTYD_PASSWORD \\
+  -p 7681 \\
+  sudo -u developer -i \\
+  > /var/log/teable-services/ttyd.log 2>&1 &
+
+echo "✓ ttyd web terminal started on port 7681" >> /var/log/startup.log
 
 echo "All services started successfully!" >> /var/log/startup.log
 `;

@@ -188,6 +188,25 @@ echo "=== Installing Playwright dependencies ==="
 sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee && npx playwright install-deps' || true
 sudo -u developer bash -c 'cd /home/developer/workspace/teable-ee && npx playwright install' || true
 
+# Install ttyd for web terminal
+echo ""
+echo "=== Installing ttyd (Web Terminal) ==="
+# Download the latest ttyd binary
+TTYD_VERSION="1.7.7"
+curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" -o /usr/local/bin/ttyd
+chmod +x /usr/local/bin/ttyd
+echo "✓ ttyd ${TTYD_VERSION} installed"
+
+# Install Claude Code for AI-assisted development
+echo ""
+echo "=== Installing Claude Code ==="
+# Install Claude Code using the official installer
+sudo -u developer bash -c 'curl -fsSL https://claude.ai/install.sh | bash' || {
+  echo "Claude Code installation failed, trying npm fallback..."
+  npm install -g @anthropic-ai/claude-code || true
+}
+echo "✓ Claude Code installed"
+
 # Configure SSH
 echo ""
 echo "=== Configuring SSH ==="

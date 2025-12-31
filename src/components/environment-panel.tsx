@@ -28,7 +28,9 @@ import {
   RefreshCw,
   CircleCheck,
   CircleX,
+  Terminal,
 } from "lucide-react";
+import { WebTerminal, WebTerminalButton } from "./web-terminal";
 
 interface ServiceStatus {
   frontend: {
@@ -73,6 +75,7 @@ export function EnvironmentPanel({
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
   const [isCheckingServices, setIsCheckingServices] = useState(false);
   const [restartingService, setRestartingService] = useState<string | null>(null);
+  const [showWebTerminal, setShowWebTerminal] = useState(false);
   const router = useRouter();
 
   // Get the currently selected environment (must be before hooks that use it)
@@ -875,12 +878,31 @@ echo "✓ SSH configured for all Teable dev environments"`;
         </div>
       </div>
 
+      {/* Web Terminal */}
+      {isRunning && environment.externalIp && showWebTerminal && (
+        <WebTerminal
+          externalIp={environment.externalIp}
+          ttydPassword={environment.ttydPassword}
+          username="developer"
+          instanceId={environment.instanceId}
+          onClose={() => setShowWebTerminal(false)}
+        />
+      )}
+
       {/* Connection Steps */}
       {isRunning && environment.externalIp && (
         <div className="rounded-3xl bg-white/[0.03] border border-white/[0.05] p-6">
           <h3 className="text-lg font-semibold mb-6">Connect</h3>
 
-          {/* Quick Connect - IDE buttons first */}
+          {/* Web Terminal Button - Most prominent */}
+          <div className="mb-6">
+            <WebTerminalButton
+              onClick={() => setShowWebTerminal(true)}
+              disabled={showWebTerminal}
+            />
+          </div>
+
+          {/* Quick Connect - IDE buttons */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
             {/* Cursor */}
             <a
