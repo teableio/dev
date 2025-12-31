@@ -995,8 +995,8 @@ echo "✓ Frontend service started on port 3000" >> /var/log/startup.log
 # Start ttyd web terminal service
 echo "Starting ttyd web terminal..." >> /var/log/startup.log
 
-# Generate a random password for ttyd authentication
-TTYD_PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16)
+# Generate a random password for ttyd authentication (use more bytes to ensure 16 chars after filtering)
+TTYD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
 # Store the password in VM metadata for the dashboard to retrieve
 curl -X PUT "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ttyd-password" \\
